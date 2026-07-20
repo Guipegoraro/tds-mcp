@@ -1,0 +1,16 @@
+{
+  "_comentario": "Copie para ~/.tds-mcp/config.json e ajuste. NUNCA versione o arquivo real: ele pode conter senhas.",
+
+  "patchesRoot": "C:\\TOTVS\\patches",
+
+  "_advplsPath": "Opcional. Só se o advpls.exe não estiver na extensão tds-vscode instalada.",
+  "advplsPath": "",
+
+  "_credentials": "Opcional. Fallback de autenticação por servidor, usado só quando o token de reconexão do TDS não funcionar. A chave é o NOME do servidor exatamente como aparece no servers.json do TDS. Preferível deixar vazio e conectar pelo VS Code para renovar o token.",
+  "credentials": {
+    "NomeDoServidorNoTDS": {
+      "user": "usuario",
+      "password": "senha"
+    }
+  }
+}

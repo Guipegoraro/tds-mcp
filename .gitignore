@@ -1,0 +1,23 @@
+# Dependências e build
+node_modules/
+dist/
+
+# Configuração local — PODE CONTER SENHAS. Nunca versionar.
+config.json
+.tds-mcp/
+*.local.json
+
+# Patches gerados e logs
+patches/
+*.ptm
+*.upd
+*.pak
+*.log
+historico*.jsonl
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

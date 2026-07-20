@@ -1,0 +1,62 @@
+{
+  "name": "tds-mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP para compilação AdvPL/TLPP e geração de patch Protheus via advpls (TDS Language Server)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "tds-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test:smoke": "node test/smoke.mjs",
+    "test:e2e": "node test/e2e-mcp.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "protheus",
+    "advpl",
+    "tlpp",
+    "totvs",
+    "tds",
+    "advpls",
+    "compilacao",
+    "patch"
+  ],
+  "author": "Guipegoraro",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guipegoraro/tds-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Guipegoraro/tds-mcp/issues"
+  },
+  "homepage": "https://github.com/Guipegoraro/tds-mcp#readme",
+  "os": [
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "vscode-jsonrpc": "^8.2.0",
+    "vscode-uri": "^3.0.8",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
