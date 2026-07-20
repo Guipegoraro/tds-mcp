@@ -14,6 +14,7 @@ import { z } from "zod";
 import { URI } from "vscode-uri";
 
 import { AdvplsClient, resolveAdvplsPath, type CompileOptions } from "./advpls.js";
+import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
 import { loadConfig, configFilePath } from "./config.js";
 import {
   SessionManager,
@@ -81,6 +82,14 @@ function jsonResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/** Resultado estruturado marcado como erro — para falhas que NÃO podem passar por sucesso. */
+function jsonFailure(data: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    isError: true,
+  };
+}
+
 function errorResult(message: string) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify({ erro: message }, null, 2) }],
@@ -126,6 +135,10 @@ async function runCompilation(files: string[], options: CompileOptions) {
   const expanded = expandFiles(files);
   if (expanded.length === 0) throw new Error("Nenhum fonte a compilar.");
 
+  // Marca o ponto do log: o advpls reporta falhas de build (ex.: a dica de
+  // BuildKillUsers no COMPILEERROR-300) por notificação, não na resposta.
+  const logMark = client.serverLog.length;
+
   const result = await client.compile({
     connectionToken: active.connectionToken,
     authorizationToken: authorizationToken(cfg),
@@ -136,14 +149,11 @@ async function runCompilation(files: string[], options: CompileOptions) {
     includeUrisRequired: expanded.some(isAdvplSource),
   });
 
-  if (result.returnCode === 40840) {
-    throw new Error("Token de autorização de compilação expirado (returnCode 40840).");
-  }
-
-  const infos = result.compileInfos ?? [];
-  const errors = infos.filter((i) => i.status === "ERROR" || i.status === "FATAL");
-  const warnings = infos.filter((i) => i.status === "WARN");
-  return { active, expanded, result, infos, errors, warnings };
+  // O veredito considera returnCode (falha de build) E status por fonte.
+  // Ver src/verdict.ts — falha de build pode vir com compileInfos vazio.
+  const verdict = compileVerdict(result);
+  const logDaOperacao = client.serverLog.slice(logMark);
+  return { active, expanded, result, verdict, logDaOperacao };
 }
 
 // ---------------------------------------------------------------------------
@@ -221,8 +231,14 @@ server.registerTool(
   {
     title: "Compilar fontes AdvPL/TLPP",
     description:
-      "Compila fontes ou pastas no RPO do servidor conectado. Retorna status por fonte " +
-      "(SUCCESS/WARN/ERROR/FATAL) com mensagens. Use recompile=true para forçar recompilação.",
+      "Compila fontes ou pastas no RPO do servidor conectado. Use recompile=true para forçar " +
+      "recompilação. COMO LER O RESULTADO: confie SEMPRE no campo booleano `sucesso` — ele já " +
+      "combina as duas formas de falha. (a) falha de BUILD: `returnCode` != 0, com `falhaDeBuild` " +
+      "explicando; nesse caso o build é revertido e NADA é gravado no RPO, mesmo que a lista " +
+      "`resultados` venha vazia ou só com SUCCESS (ex.: COMPILEERROR-300 = sem acesso exclusivo ao " +
+      "RPO). (b) falha de FONTE: itens com status ERROR/FATAL em `resultados`. Nunca conclua " +
+      "sucesso apenas por não haver erros em `resultados`. Em falha, `logDoServidor` traz as " +
+      "mensagens do AppServer.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
@@ -231,21 +247,25 @@ server.registerTool(
   safe(async ({ arquivos, recompile }) => {
     const options = defaultCompileOptions();
     options.recompile = recompile ?? false;
-    const { active, expanded, infos, errors, warnings } = await runCompilation(arquivos, options);
-    return jsonResult({
+    const { active, expanded, verdict, logDaOperacao } = await runCompilation(arquivos, options);
+    const payload = {
       servidor: active.def.name,
       ambiente: active.environment,
       totalFontes: expanded.length,
-      sucesso: errors.length === 0,
-      erros: errors.length,
-      avisos: warnings.length,
-      resultados: infos.map((i) => ({
+      sucesso: verdict.sucesso,
+      returnCode: verdict.returnCode,
+      ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+      erros: verdict.erros.length,
+      avisos: verdict.avisos.length,
+      resultados: verdict.infos.map((i) => ({
         status: i.status,
         arquivo: i.filePath,
         mensagem: i.message,
         detalhe: i.detail,
       })),
-    });
+      ...(verdict.sucesso ? {} : { logDoServidor: logDaOperacao }),
+    };
+    return verdict.sucesso ? jsonResult(payload) : jsonFailure(payload);
   })
 );
 
@@ -255,7 +275,9 @@ server.registerTool(
     title: "Verificar sintaxe (sem gravar no RPO)",
     description:
       "Compila com syntaxOnly: valida os fontes no servidor SEM commitar no RPO. " +
-      "Sem efeito colateral — pode ser usada livremente antes de tds_compile.",
+      "Sem efeito colateral — pode ser usada livremente antes de tds_compile. " +
+      "Confie no campo `sintaxeOk`: ele considera tanto `returnCode` (falha de build) quanto " +
+      "os status por fonte. Lista `resultados` vazia NÃO significa sucesso.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
     },
@@ -264,21 +286,25 @@ server.registerTool(
   safe(async ({ arquivos }) => {
     const options = defaultCompileOptions();
     options.syntaxOnly = true;
-    const { active, expanded, infos, errors, warnings } = await runCompilation(arquivos, options);
-    return jsonResult({
+    const { active, expanded, verdict, logDaOperacao } = await runCompilation(arquivos, options);
+    const payload = {
       servidor: active.def.name,
       ambiente: active.environment,
       totalFontes: expanded.length,
-      sintaxeOk: errors.length === 0,
-      erros: errors.length,
-      avisos: warnings.length,
-      resultados: infos.map((i) => ({
+      sintaxeOk: verdict.sucesso,
+      ...(verdict.sucesso ? {} : { logDoServidor: logDaOperacao }),
+      returnCode: verdict.returnCode,
+      ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+      erros: verdict.erros.length,
+      avisos: verdict.avisos.length,
+      resultados: verdict.infos.map((i) => ({
         status: i.status,
         arquivo: i.filePath,
         mensagem: i.message,
         detalhe: i.detail,
       })),
-    });
+    };
+    return verdict.sucesso ? jsonResult(payload) : jsonFailure(payload);
   })
 );
 
@@ -298,13 +324,19 @@ server.registerTool(
     const options = defaultCompileOptions();
     options.recompile = true;
     options.returnPpo = true;
-    const { infos } = await runCompilation([arquivo], options);
-    const ppo = infos.find((i) => i.status === "APPRE");
+    const { verdict } = await runCompilation([arquivo], options);
+    const ppo = verdict.infos.find((i) => i.status === "APPRE");
     if (!ppo) {
-      return jsonResult({
+      return jsonFailure({
         sucesso: false,
+        returnCode: verdict.returnCode,
+        ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
         mensagem: "PPO não retornado; veja resultados",
-        resultados: infos.map((i) => ({ status: i.status, arquivo: i.filePath, mensagem: i.message })),
+        resultados: verdict.infos.map((i) => ({
+          status: i.status,
+          arquivo: i.filePath,
+          mensagem: i.message,
+        })),
       });
     }
     return { content: [{ type: "text" as const, text: ppo.detail }] };
@@ -492,8 +524,14 @@ server.registerTool(
       patchFiles: sources.map((s) => s.name),
     });
 
-    if (result && result.returnCode === 40840) {
-      throw new Error("Token de autorização expirado (returnCode 40840).");
+    // Mesma regra da compilação: returnCode != 0 = falha de build, mesmo sem
+    // erro por fonte. Nunca assumir sucesso só porque a resposta chegou.
+    const rc = typeof result?.returnCode === "number" ? result.returnCode : 0;
+    if (rc !== 0) {
+      throw new Error(
+        RETURN_CODE_HINTS[rc] ??
+          `Geração de patch falhou no servidor (returnCode ${rc}). Consulte tds_server_log.`
+      );
     }
 
     // Localiza o arquivo gerado
@@ -595,7 +633,8 @@ server.registerTool(
       validateOnly: true,
     });
 
-    const ok = !result.error;
+    // error e errorCode: qualquer um diferente de zero/false indica falha.
+    const ok = !result.error && (result.errorCode ?? 0) === 0;
     appendHistory(config.patchesRoot, dirIfManaged(arquivoPatch), {
       ts: new Date().toISOString(),
       op: "validate",
@@ -682,7 +721,8 @@ server.registerTool(
       applyOld: aplicarAntigos ?? false,
     });
 
-    const ok = !result.error;
+    // error e errorCode: qualquer um diferente de zero/false indica falha.
+    const ok = !result.error && (result.errorCode ?? 0) === 0;
     appendHistory(config.patchesRoot, dirIfManaged(arquivoPatch), {
       ts: new Date().toISOString(),
       op: "apply",
@@ -694,7 +734,7 @@ server.registerTool(
       detail: result.message,
     });
 
-    return jsonResult({
+    const payload = {
       aplicado: ok,
       servidor: active.def.name,
       ambiente: active.environment,
@@ -705,7 +745,9 @@ server.registerTool(
         dataPatch: v.datePatch,
         dataRPO: v.dateRpo,
       })),
-    });
+    };
+    // Deploy que falhou nunca pode ser lido como sucesso.
+    return ok ? jsonResult(payload) : jsonFailure(payload);
   })
 );
 

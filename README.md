@@ -106,6 +106,26 @@ No Claude Code, em `~/.claude/settings.json`:
 
 As demais tools são read-only e podem ser liberadas sem risco.
 
+## Como ler o resultado de uma compilação
+
+Uma compilação pode falhar em **dois níveis independentes** — e olhar só um deles faz erro
+parecer sucesso:
+
+| Nível | Onde aparece | Exemplo |
+|---|---|---|
+| **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40840` (token expirado) |
+| **Fonte** | `resultados[].status` = `ERROR`/`FATAL` | erro de sintaxe |
+
+Uma falha de **build** acontece antes/fora da compilação individual: `resultados` pode vir
+**vazio ou só com `SUCCESS`**, e ainda assim **nada foi gravado no RPO** (o build é revertido).
+
+> **Sempre use o booleano `sucesso`** (ou `sintaxeOk`) — ele já combina os dois níveis.
+> Nunca conclua sucesso apenas porque não há itens `ERROR` em `resultados`.
+
+Quando falha, a resposta também vem marcada como erro no protocolo MCP (`isError`) e inclui
+`logDoServidor` com as mensagens do AppServer — é lá que aparece, por exemplo, a dica
+`BuildKillUsers = 1` do `COMPILEERROR-300`.
+
 ## Semântica das datas (importante — evita conclusão errada)
 
 O campo de data que o RPO expõe por objeto (`dataFonte` em `tds_rpo_objects`, `date` em
@@ -158,9 +178,11 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 
 ```bash
 npm run build                                  # compila TypeScript
+npm test                                       # testes de lógica (não precisa de AppServer)
 
 node test/smoke.mjs <servidor> [ambiente]      # read-only: conecta e inspeciona o RPO
 node test/debug-protocol.mjs [host] [porta]    # JSON-RPC cru (diagnóstico de protocolo)
+node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada cenário
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO
