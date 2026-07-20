@@ -53,6 +53,25 @@ const casos = [
     esperado: true,
   },
   {
+    // Cenario real medido: fonte ja atualizado no RPO com recompile=false
+    nome: "tudo SKIPPED: sucesso, mas com aviso de que nada foi gravado",
+    resposta: {
+      returnCode: 0,
+      compileInfos: [{ status: "SKIPPED", filePath: "a.prw", message: "", detail: "" }],
+    },
+    esperado: true,
+    exigeAviso: true,
+  },
+  {
+    // Cenario real medido: erro de sintaxe e arquivo inexistente retornam -1
+    nome: "erro por fonte com returnCode -1 (medido no AppServer)",
+    resposta: {
+      returnCode: -1,
+      compileInfos: [{ status: "ERROR", filePath: "a.prw", message: "erro", detail: "C2002" }],
+    },
+    esperado: false,
+  },
+  {
     nome: "returnCode ausente é tratado como 0",
     resposta: {
       compileInfos: [{ status: "SUCCESS", filePath: "a.prw", message: "ok", detail: "" }],
@@ -64,11 +83,13 @@ const casos = [
 let falhas = 0;
 for (const c of casos) {
   const v = compileVerdict(c.resposta);
-  const ok = v.sucesso === c.esperado;
+  let ok = v.sucesso === c.esperado;
+  if (c.exigeAviso && !v.aviso) ok = false;
   if (!ok) falhas++;
   console.log(
     `${ok ? "PASS" : "FAIL"}  ${c.nome}\n      sucesso=${v.sucesso} (esperado ${c.esperado}) returnCode=${v.returnCode}` +
-      (v.falhaDeBuild ? `\n      motivo: ${v.falhaDeBuild.substring(0, 110)}...` : "")
+      (v.falhaDeBuild ? `\n      motivo: ${v.falhaDeBuild.substring(0, 110)}...` : "") +
+      (v.aviso ? `\n      aviso : ${v.aviso.substring(0, 110)}...` : "")
   );
 }
 

@@ -31,15 +31,21 @@ export interface CompileVerdict {
   returnCode: number;
   /** Preenchido quando a falha é de build (returnCode != 0). */
   falhaDeBuild?: string;
+  /** Preenchido quando a operação passou, mas nenhum fonte foi efetivamente gravado. */
+  aviso?: string;
   infos: CompileInfo[];
   erros: CompileInfo[];
   avisos: CompileInfo[];
+  ignorados: CompileInfo[];
 }
 
 export function compileVerdict(result: CompileResult): CompileVerdict {
   const infos = result?.compileInfos ?? [];
   const erros = infos.filter((i) => i.status === "ERROR" || i.status === "FATAL");
   const avisos = infos.filter((i) => i.status === "WARN");
+  // SKIPPED: o servidor ignorou o fonte (normalmente já está atualizado no RPO
+  // e recompile=false). Não é erro, mas também NÃO houve gravação.
+  const ignorados = infos.filter((i) => i.status === "SKIPPED");
 
   // returnCode ausente na resposta é tratado como 0 (sucesso) para não quebrar
   // servidores/builds que omitem o campo; a checagem de ERROR/FATAL continua valendo.
@@ -59,12 +65,25 @@ export function compileVerdict(result: CompileResult): CompileVerdict {
     }
   }
 
+  const sucesso = !buildFalhou && erros.length === 0;
+
+  // Sucesso em que TUDO foi ignorado: nada foi gravado no RPO. Reportar como
+  // "compilado" sem ressalva seria enganoso.
+  let aviso: string | undefined;
+  if (sucesso && infos.length > 0 && ignorados.length === infos.length) {
+    aviso =
+      `Nenhum fonte foi gravado: os ${ignorados.length} fonte(s) foram ignorados (SKIPPED) ` +
+      `pelo servidor, normalmente porque o RPO já está atualizado. Use recompile=true para forçar.`;
+  }
+
   return {
-    sucesso: !buildFalhou && erros.length === 0,
+    sucesso,
     returnCode,
     falhaDeBuild,
+    aviso,
     infos,
     erros,
     avisos,
+    ignorados,
   };
 }

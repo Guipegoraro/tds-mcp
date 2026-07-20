@@ -238,7 +238,9 @@ server.registerTool(
       "`resultados` venha vazia ou só com SUCCESS (ex.: COMPILEERROR-300 = sem acesso exclusivo ao " +
       "RPO). (b) falha de FONTE: itens com status ERROR/FATAL em `resultados`. Nunca conclua " +
       "sucesso apenas por não haver erros em `resultados`. Em falha, `logDoServidor` traz as " +
-      "mensagens do AppServer.",
+      "mensagens do AppServer. ATENÇÃO ao status SKIPPED: o fonte foi ignorado por já estar " +
+      "atualizado no RPO — é sucesso, mas NADA foi gravado; confira `ignorados` e o campo " +
+      "`aviso` antes de afirmar que compilou.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
@@ -255,8 +257,10 @@ server.registerTool(
       sucesso: verdict.sucesso,
       returnCode: verdict.returnCode,
       ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+      ...(verdict.aviso ? { aviso: verdict.aviso } : {}),
       erros: verdict.erros.length,
       avisos: verdict.avisos.length,
+      ignorados: verdict.ignorados.length,
       resultados: verdict.infos.map((i) => ({
         status: i.status,
         arquivo: i.filePath,
@@ -295,8 +299,10 @@ server.registerTool(
       ...(verdict.sucesso ? {} : { logDoServidor: logDaOperacao }),
       returnCode: verdict.returnCode,
       ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+      ...(verdict.aviso ? { aviso: verdict.aviso } : {}),
       erros: verdict.erros.length,
       avisos: verdict.avisos.length,
+      ignorados: verdict.ignorados.length,
       resultados: verdict.infos.map((i) => ({
         status: i.status,
         arquivo: i.filePath,

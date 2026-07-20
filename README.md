@@ -114,7 +114,7 @@ parecer sucesso:
 | Nível | Onde aparece | Exemplo |
 |---|---|---|
 | **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40840` (token expirado) |
-| **Fonte** | `resultados[].status` = `ERROR`/`FATAL` | erro de sintaxe |
+| **Fonte** | `resultados[].status` = `ERROR`/`FATAL` | erro de sintaxe (`returnCode -1`) |
 
 Uma falha de **build** acontece antes/fora da compilação individual: `resultados` pode vir
 **vazio ou só com `SUCCESS`**, e ainda assim **nada foi gravado no RPO** (o build é revertido).
@@ -125,6 +125,14 @@ Uma falha de **build** acontece antes/fora da compilação individual: `resultad
 Quando falha, a resposta também vem marcada como erro no protocolo MCP (`isError`) e inclui
 `logDoServidor` com as mensagens do AppServer — é lá que aparece, por exemplo, a dica
 `BuildKillUsers = 1` do `COMPILEERROR-300`.
+
+**Sucesso sem gravação:** fontes já atualizados no RPO voltam com status `SKIPPED` (quando
+`recompile=false`). Isso conta como sucesso, mas **nada foi escrito** — se todos forem
+ignorados, a resposta traz o campo `aviso` dizendo isso. Confira `ignorados` antes de
+afirmar que algo foi compilado.
+
+Valores de `returnCode` medidos em AppServer 7.00.240223P: `0` sucesso, `-1` erro de fonte
+(sintaxe / arquivo inexistente), `-300` sem acesso exclusivo ao RPO, `40840` token expirado.
 
 ## Semântica das datas (importante — evita conclusão errada)
 
@@ -183,6 +191,7 @@ npm test                                       # testes de lógica (não precisa
 node test/smoke.mjs <servidor> [ambiente]      # read-only: conecta e inspeciona o RPO
 node test/debug-protocol.mjs [host] [porta]    # JSON-RPC cru (diagnóstico de protocolo)
 node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada cenário
+node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MCP
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO
