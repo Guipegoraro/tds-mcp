@@ -59,6 +59,10 @@ Cliente MCP (Claude)
         └── JSON-RPC: $totvsserver/connect, compilation, patchGenerate, patchApply, ...
 ```
 
+O arquivo é procurado na mesma ordem que o TDS usa: `TDS_MCP_SERVERS_JSON` (override) →
+`.vscode/servers.json` do workspace (opção *Workspace server config*) → `~/.totvsls/servers.json`.
+`tds_list_servers` mostra em `arquivoConfig` qual está em uso.
+
 Autenticação, em ordem:
 
 1. **Token de reconexão salvo pelo TDS** — funciona sem senha nenhuma. Se expirar, basta
@@ -133,6 +137,21 @@ afirmar que algo foi compilado.
 
 Valores de `returnCode` medidos em AppServer 7.00.240223P: `0` sucesso, `-1` erro de fonte
 (sintaxe / arquivo inexistente), `-300` sem acesso exclusivo ao RPO, `40840` token expirado.
+
+## Encoding: fontes precisam estar em CP1252
+
+O compilador Protheus só aceita **Windows-1252**. Um fonte em UTF-8 com acentos vai para o
+RPO com caracteres corrompidos — às vezes **sem erro de compilação**, o que é pior que falhar.
+Como agentes de IA gravam em UTF-8 por padrão, `tds_compile` e `tds_syntax_check`
+**verificam antes de enviar e recusam** o que não estiver em CP1252:
+
+- arquivo 100% ASCII → passa (é idêntico nos dois encodings)
+- bytes altos que **não** formam UTF-8 válido → assume CP1252 → passa
+- UTF-8 válido com acentos, ou BOM UTF-8 → **bloqueia**, dizendo qual arquivo e como converter
+
+O arquivo **nunca é alterado** pelo MCP — a conversão é decisão sua (`convert_encoding` do
+MCP file-tools, ou *Save with Encoding → Windows 1252* no VS Code). Recursos binários
+(`.png`, `.bmp`, `.res`) não passam pela checagem.
 
 ## Semântica das datas (importante — evita conclusão errada)
 
@@ -228,7 +247,9 @@ Se você precisa de CI/CD em vez de um assistente:
 
 Este projeto não é afiliado à TOTVS. O protocolo foi derivado do código-fonte público do
 [tds-vscode](https://github.com/totvs/tds-vscode) (Apache-2.0) e da documentação do
-[tds-ls](https://github.com/totvs/tds-ls). Protheus, AdvPL, TLPP e TOTVS são marcas de
+[tds-ls](https://github.com/totvs/tds-ls). As regras de encoding CP1252, a lista de
+extensões compiláveis e parte do troubleshooting seguem a skill oficial
+`advpl-tlpp-compile` (Engenharia Protheus, MIT). Protheus, AdvPL, TLPP e TOTVS são marcas de
 seus respectivos proprietários.
 
 ## Licença

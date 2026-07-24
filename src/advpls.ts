@@ -234,9 +234,13 @@ export class AdvplsClient {
   // Requests $totvsserver/*
   // ------------------------------------------------------------------
 
-  validation(server: string, port: number): Promise<ValidationResult> {
+  validation(
+    server: string,
+    port: number,
+    serverType = "totvs_server_protheus"
+  ): Promise<ValidationResult> {
     return this.request("$totvsserver/validation", {
-      validationInfo: { server, port, serverType: "totvs_server_protheus" },
+      validationInfo: { server, port, serverType },
     });
   }
 
@@ -249,13 +253,15 @@ export class AdvplsClient {
     secure: boolean;
     environment: string;
     connType?: number;
+    /** 1 = Protheus, 2 = Logix, 3 = TotvsTec (Harpia). */
+    serverType?: number;
   }): Promise<ConnectResult> {
     return this.request("$totvsserver/connect", {
       connectionInfo: {
         connType: info.connType ?? CONN_TYPE.DEBUGGER,
         serverName: info.serverName,
         identification: info.identification,
-        serverType: 1, // totvs_server_protheus
+        serverType: info.serverType ?? 1,
         server: info.server,
         port: info.port,
         build: info.build,

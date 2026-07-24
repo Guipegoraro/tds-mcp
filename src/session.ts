@@ -42,8 +42,37 @@ export interface ActiveSession {
   authMethod: "none" | "saved-token" | "credentials";
 }
 
+/**
+ * Localiza o servers.json na mesma ordem que o TDS:
+ * override explícito > servers.json do workspace (opção
+ * `totvsLanguageServer.workspaceServerConfig`) > global em ~/.totvsls.
+ */
 export function serversJsonPath(): string {
+  const override = process.env.TDS_MCP_SERVERS_JSON;
+  if (override && fs.existsSync(override)) return override;
+
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    const candidate = path.join(dir, ".vscode", "servers.json");
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
   return path.join(os.homedir(), ".totvsls", "servers.json");
+}
+
+/** Código do tipo de servidor esperado pelo protocolo: Protheus/Logix/TotvsTec. */
+export function serverTypeCode(type: string | undefined): number {
+  switch (type) {
+    case "totvs_server_logix":
+      return 2;
+    case "totvs_server_totvstec":
+      return 3;
+    default:
+      return 1; // totvs_server_protheus
+  }
 }
 
 export function readServersJson(): ServersJson {
@@ -130,7 +159,7 @@ export class SessionManager {
     let build = def.buildVersion ?? "";
     let secure = def.secure;
     try {
-      const v = await this.client.validation(def.address, def.port);
+      const v = await this.client.validation(def.address, def.port, def.type);
       if (v.build) build = v.build;
       secure = !!v.secure;
     } catch {
@@ -147,6 +176,7 @@ export class SessionManager {
       build,
       secure,
       environment: env,
+      serverType: serverTypeCode(def.type),
     });
 
     if (!conn.connectionToken) {

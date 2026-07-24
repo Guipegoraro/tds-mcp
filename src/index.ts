@@ -15,10 +15,12 @@ import { URI } from "vscode-uri";
 
 import { AdvplsClient, resolveAdvplsPath, type CompileOptions } from "./advpls.js";
 import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
+import { checkFiles, encodingErrorMessage } from "./encoding.js";
 import { loadConfig, configFilePath } from "./config.js";
 import {
   SessionManager,
   readServersJson,
+  serversJsonPath,
   effectiveIncludes,
   authorizationToken,
 } from "./session.js";
@@ -37,7 +39,16 @@ import {
   type PatchSourceEntry,
 } from "./trace.js";
 
-const ADVPL_SOURCE_EXT = [".prw", ".prx", ".prg", ".tlpp", ".aph", ".ahu", ".apl", ".apw", ".4gl"];
+/**
+ * Extensões aceitas, espelhando o default de
+ * `totvsLanguageServer.folder.extensionsAllowed` da extensão tds-vscode.
+ */
+const ADVPL_SOURCE_EXT = [
+  ".prw", ".prx", ".prg", ".ppx", ".ppp", ".tlpp",
+  ".apw", ".aph", ".apl", ".ahu", ".4gl", ".per",
+];
+/** Recursos: vão para o RPO junto dos fontes (traduções, imagens, layouts). */
+const ADVPL_RESOURCE_EXT = [".tres", ".png", ".bmp", ".res", ".js", ".rptdesign"];
 
 const config = loadConfig();
 let client: AdvplsClient | undefined;
@@ -60,7 +71,15 @@ function isAdvplSource(file: string): boolean {
   return ADVPL_SOURCE_EXT.includes(path.extname(file).toLowerCase());
 }
 
-/** Expande caminhos: arquivos diretos + varredura recursiva de pastas. */
+function isAdvplResource(file: string): boolean {
+  return ADVPL_RESOURCE_EXT.includes(path.extname(file).toLowerCase());
+}
+
+/**
+ * Expande caminhos: arquivos informados diretamente + varredura recursiva de
+ * pastas. Na varredura entram fontes E recursos (antes os recursos eram
+ * descartados em silêncio).
+ */
 function expandFiles(inputs: string[]): string[] {
   const result: string[] = [];
   for (const input of inputs) {
@@ -69,7 +88,8 @@ function expandFiles(inputs: string[]): string[] {
     if (stat.isDirectory()) {
       for (const entry of fs.readdirSync(input, { recursive: true, encoding: "utf-8" })) {
         const full = path.join(input, entry);
-        if (fs.statSync(full).isFile() && isAdvplSource(full)) result.push(full);
+        if (!fs.statSync(full).isFile()) continue;
+        if (isAdvplSource(full) || isAdvplResource(full)) result.push(full);
       }
     } else {
       result.push(input);
@@ -135,6 +155,11 @@ async function runCompilation(files: string[], options: CompileOptions) {
   const expanded = expandFiles(files);
   if (expanded.length === 0) throw new Error("Nenhum fonte a compilar.");
 
+  // O compilador Protheus só aceita CP1252. Bloqueia ANTES de enviar para não
+  // gravar fonte corrompido no RPO (ver src/encoding.ts).
+  const problemas = checkFiles(expanded).filter((c) => !c.safe);
+  if (problemas.length > 0) throw new Error(encodingErrorMessage(problemas));
+
   // Marca o ponto do log: o advpls reporta falhas de build (ex.: a dica de
   // BuildKillUsers no COMPILEERROR-300) por notificação, não na resposta.
   const logMark = client.serverLog.length;
@@ -176,6 +201,7 @@ server.registerTool(
     const cfg = readServersJson();
     const active = session?.current;
     return jsonResult({
+      arquivoConfig: serversJsonPath(),
       sessaoAtiva: active
         ? {
             servidor: active.def.name,
@@ -240,7 +266,9 @@ server.registerTool(
       "sucesso apenas por não haver erros em `resultados`. Em falha, `logDoServidor` traz as " +
       "mensagens do AppServer. ATENÇÃO ao status SKIPPED: o fonte foi ignorado por já estar " +
       "atualizado no RPO — é sucesso, mas NADA foi gravado; confira `ignorados` e o campo " +
-      "`aviso` antes de afirmar que compilou.",
+      "`aviso` antes de afirmar que compilou. Fontes precisam estar em CP1252: arquivos em " +
+      "UTF-8 são recusados antes do envio (o compilador Protheus gravaria caracteres " +
+      "corrompidos no RPO). Aceita fontes e recursos (.tres, .png, imagens, layouts).",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
@@ -258,6 +286,7 @@ server.registerTool(
       returnCode: verdict.returnCode,
       ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
       ...(verdict.aviso ? { aviso: verdict.aviso } : {}),
+      ...(verdict.causaProvavel ? { causaProvavel: verdict.causaProvavel } : {}),
       erros: verdict.erros.length,
       avisos: verdict.avisos.length,
       ignorados: verdict.ignorados.length,
@@ -300,6 +329,7 @@ server.registerTool(
       returnCode: verdict.returnCode,
       ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
       ...(verdict.aviso ? { aviso: verdict.aviso } : {}),
+      ...(verdict.causaProvavel ? { causaProvavel: verdict.causaProvavel } : {}),
       erros: verdict.erros.length,
       avisos: verdict.avisos.length,
       ignorados: verdict.ignorados.length,

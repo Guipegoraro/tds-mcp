@@ -33,6 +33,8 @@ export interface CompileVerdict {
   falhaDeBuild?: string;
   /** Preenchido quando a operação passou, mas nenhum fonte foi efetivamente gravado. */
   aviso?: string;
+  /** Causa provável deduzida da mensagem de erro (chave de compilação, includes...). */
+  causaProvavel?: string;
   infos: CompileInfo[];
   erros: CompileInfo[];
   avisos: CompileInfo[];
@@ -65,6 +67,9 @@ export function compileVerdict(result: CompileResult): CompileVerdict {
     }
   }
 
+  // Causas conhecidas que o servidor reporta apenas na mensagem do fonte.
+  const causaProvavel = diagnoseKnownCauses(erros);
+
   const sucesso = !buildFalhou && erros.length === 0;
 
   // Sucesso em que TUDO foi ignorado: nada foi gravado no RPO. Reportar como
@@ -81,9 +86,40 @@ export function compileVerdict(result: CompileResult): CompileVerdict {
     returnCode,
     falhaDeBuild,
     aviso,
+    causaProvavel,
     infos,
     erros,
     avisos,
     ignorados,
   };
+}
+
+/**
+ * Traduz mensagens de erro conhecidas em causa + ação. Baseado no
+ * troubleshooting da documentação oficial do tds-vscode.
+ */
+function diagnoseKnownCauses(erros: CompileInfo[]): string | undefined {
+  if (erros.length === 0) return undefined;
+  const texto = erros.map((e) => `${e.message} ${e.detail}`).join(" ").toLowerCase();
+
+  if (/authoriz|licen[çc]|compile key|chave de compila|\.aut\b/.test(texto)) {
+    return (
+      "Possível falta de chave de compilação: fontes com `Function` / `Main Function` " +
+      "(em vez de `User Function`) exigem autorização `.aut` ou token de RPO. " +
+      "Aplique a chave no TDS (Compile Key / RPO token) ou converta para `User Function`."
+    );
+  }
+  if (/include|#include|não encontrado.*\.ch|undefined.*define/.test(texto)) {
+    return (
+      "Possível problema de includes: confira as pastas de include do servidor no " +
+      "servers.json (campo `includes`) — devem apontar para os `.ch`/`.th` da build correta."
+    );
+  }
+  if (/invalid character|caracter|mojibake|�/.test(texto)) {
+    return (
+      "Possível problema de encoding: o fonte deve estar em CP1252. " +
+      "Converta e recompile."
+    );
+  }
+  return undefined;
 }
