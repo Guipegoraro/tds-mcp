@@ -501,8 +501,10 @@ server.registerTool(
     title: "Gerar patch (PTM) com rastreabilidade",
     description:
       "Gera um patch PTM a partir de fontes já compilados no RPO, com organização padrão " +
-      "(<raiz>/<cliente>/<ticket>/DDMMAA_HHMM_<slug>.ptm, datas no padrão brasileiro), manifesto JSON (sha256, fontes, " +
-      "datas do RPO, servidor, autor, git) e histórico. Retorna também título e descrição " +
+      "(<raiz>/<cliente>/<ticket>/DDMMAA_HHMM_<ticket>_<customizacao>.ptm, datas no padrão brasileiro), " +
+      "manifesto JSON (sha256, fontes, datas do RPO, servidor, autor, git) e histórico. Exige o " +
+      "identificador da customização (vai no nome do arquivo junto com o ticket) e o título para o " +
+      "tcloud (até 60 caracteres), devolvido em tituloTcloud. Retorna também título e descrição " +
       "recomendados — o título começa com data e hora. No manifesto/retorno, rpoDate de cada " +
       "fonte é o mtime do arquivo-fonte na compilação (semântica de tds_rpo_objects), não o " +
       "instante da compilação.",
@@ -512,7 +514,25 @@ server.registerTool(
         .min(1)
         .describe("Nomes dos objetos no RPO (ex.: TEC10R06.PRW). Devem já estar compilados."),
       cliente: z.string().describe("Nome do cliente (vira pasta)"),
-      ticket: z.string().describe("Ticket/slug da demanda (vira pasta)"),
+      ticket: z.string().describe("Número do ticket da demanda (vira pasta e entra no nome do arquivo)"),
+      customizacao: z
+        .string()
+        .min(3)
+        .max(40)
+        .regex(/^[a-z0-9]+(_[a-z0-9]+)*$/, "Use snake_case minúsculo, sem acento (ex.: balanca_refugo_req_op)")
+        .describe(
+          "Identificador curto da customização em snake_case, sem acento, até 40 caracteres " +
+            "(ex.: balanca_refugo_req_op). Vai no nome do arquivo depois do ticket."
+        ),
+      tituloTcloud: z
+        .string()
+        .trim()
+        .min(5)
+        .max(60, "O título do tcloud tem no máximo 60 caracteres")
+        .describe(
+          "Título para cadastrar o patch no tcloud, até 60 caracteres, com o ticket e o que muda " +
+            "(ex.: '18662 Balança refugo: regras, data e requisição na OP')."
+        ),
       descricao: z.string().optional().default("").describe("Motivo/resumo da alteração"),
       pastaFontesLocais: z
         .string()
@@ -520,7 +540,7 @@ server.registerTool(
         .describe("Pasta local dos fontes (para registrar commit git no manifesto)"),
     },
   },
-  safe(async ({ fontes, cliente, ticket, descricao, pastaFontesLocais }) => {
+  safe(async ({ fontes, cliente, ticket, customizacao, tituloTcloud, descricao, pastaFontesLocais }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const cfg = readServersJson();
@@ -543,7 +563,8 @@ server.registerTool(
     }
 
     const stamp = nowStamp();
-    const slugBase = fontes.length === 1 ? path.parse(fontes[0]).name : slugify_safe(ticket);
+    // Ticket + customização no nome: o arquivo se identifica sozinho, sem abrir o manifesto
+    const slugBase = `${slugify_safe(ticket)}_${customizacao}`;
     const destDir = ensurePatchDir(config.patchesRoot, cliente, ticket);
     // DDMMAA_HHMM; se já existir patch no mesmo minuto, usa variante com segundos
     let baseName = patchBaseName(stamp, slugBase);
@@ -598,6 +619,8 @@ server.registerTool(
 
     const manifest: PatchManifest = {
       titulo,
+      tituloTcloud,
+      customizacao,
       descricao: descricaoCompleta,
       patchFile,
       sha256: sha256File(patchFile),
@@ -631,6 +654,7 @@ server.registerTool(
 
     return jsonResult({
       sucesso: true,
+      tituloTcloud,
       tituloRecomendado: titulo,
       descricaoRecomendada: descricaoCompleta,
       patch: patchFile,

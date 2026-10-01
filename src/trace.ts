@@ -21,6 +21,10 @@ export interface PatchSourceEntry {
 
 export interface PatchManifest {
   titulo: string;
+  /** Título curto (até 60 caracteres) para cadastrar o patch no tcloud. */
+  tituloTcloud: string;
+  /** Identificador da customização (vai no nome do arquivo junto com o ticket). */
+  customizacao: string;
   descricao: string;
   patchFile: string;
   sha256: string;

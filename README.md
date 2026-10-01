@@ -172,14 +172,22 @@ Exceção: `tds_rpo_info.dataGeracao` e as datas do histórico de patches (`gera
 
 Cada `tds_patch_generate` produz em `<patchesRoot>/<cliente>/<ticket>/`:
 
-- `DDMMAA_HHMM_<slug>.ptm` — data/hora (padrão brasileiro) lideram o nome, ex.
-  `190726_2037_tec10r06.ptm`. Colisão no mesmo minuto ganha segundos (`DDMMAA_HHMMSS`).
-- `DDMMAA_HHMM_<slug>.manifest.json` — título e descrição recomendados, sha256, fontes com
-  data do RPO, servidor/ambiente/build de origem, autor, commit git (opcional)
+- `DDMMAA_HHMM_<ticket>_<customizacao>.ptm` — data/hora (padrão brasileiro) lideram o nome,
+  seguidas do ticket e do identificador da customização, ex.
+  `011026_1706_00018662_balanca_refugo_req_op.ptm`. Colisão no mesmo minuto ganha segundos
+  (`DDMMAA_HHMMSS`). `customizacao` é obrigatório: snake_case minúsculo, sem acento, até 40
+  caracteres.
+- `DDMMAA_HHMM_<ticket>_<customizacao>.manifest.json` — título do tcloud, título e descrição
+  recomendados, sha256, fontes com data do RPO, servidor/ambiente/build de origem, autor, commit
+  git (opcional)
 - `historico.jsonl` — append-only por ticket (gerações, validações, aplicações)
 - `<patchesRoot>/historico-global.jsonl` — histórico consolidado
 
 Título recomendado (data e hora primeiro): `19/07/2026 20:37 — Cliente ticket — FONTE.PRW`
+
+Título do tcloud (`tituloTcloud`, obrigatório, até 60 caracteres, validado na entrada e devolvido
+no retorno e no manifesto): ticket + o que muda, ex. `18662 Balança refugo: regras, data e
+requisição na OP`.
 
 ## Configuração
 

@@ -59,6 +59,8 @@ const gen = await call("tds_patch_generate", {
   fontes: ["ZTSTMCP1.PRW"],
   cliente: "Testes",
   ticket: "mcp-e2e",
+  customizacao: "teste_e2e",
+  tituloTcloud: "mcp-e2e Teste E2E do tds-mcp",
   descricao: "Teste E2E do tds-mcp: compilacao + geracao de patch",
 });
 
