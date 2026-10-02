@@ -369,6 +369,24 @@ export class DebugSession {
   }
 }
 
+/**
+ * Remove logs de adaptador com mais de uma hora: sobras de processos que
+ * terminaram sem limpar. O log de uma sessão viva (deste ou de outro tds-mcp)
+ * está aberto pelo adaptador e o Windows recusa a remoção.
+ */
+function removeStaleAdapterLogs(logDir: string): void {
+  const limite = Date.now() - 3600_000;
+  for (const name of fs.readdirSync(logDir)) {
+    if (!/^debugAdapter-\d+\.log$/.test(name)) continue;
+    const file = path.join(logDir, name);
+    try {
+      if (fs.statSync(file).mtimeMs < limite) fs.rmSync(file, { force: true });
+    } catch {
+      /* em uso ou já removido */
+    }
+  }
+}
+
 /** Uma sessão por vez; encerra sozinha após inatividade e ao sair do processo. */
 export class DebugManager {
   current?: DebugSession;
@@ -421,6 +439,7 @@ export class DebugManager {
     if (this.current) await this.stop();
     const logDir = path.join(os.tmpdir(), "tds-mcp");
     fs.mkdirSync(logDir, { recursive: true });
+    removeStaleAdapterLogs(logDir);
     const dap = new DapClient(opts.adapterPath, path.join(logDir, `debugAdapter-${Date.now()}.log`));
     const session = new DebugSession(dap, opts);
 
@@ -487,8 +506,9 @@ export class DebugManager {
     }
     session.url = await session.readWebappUrl();
     if (!session.url) {
+      const logs = dap.logsSince(0).map((l) => l.mensagem).join(" | ");
       await session.stop();
-      throw new Error(`O debugAdapter não informou a URL do webapp (log: ${dap.internalLog}).`);
+      throw new Error(`O debugAdapter não informou a URL do webapp. ${logs}`.trim());
     }
     if (opts.modo !== "navegador") {
       session.browser = await HeadlessWebapp.open(

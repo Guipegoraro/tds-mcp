@@ -42,7 +42,7 @@ export function resolveDebugAdapterPath(advplsPath: string, configured?: string)
 
 export class DapClient {
   readonly proc: ChildProcess;
-  /** Log interno do adaptador (--log-file): é onde ele registra a URL do webapp. */
+  /** Log interno do adaptador (--log-file): é onde ele registra a URL do webapp. Apagado quando o adaptador sai. */
   readonly internalLog: string;
   readonly events: DapEvent[] = [];
   private seq = 1;
@@ -62,8 +62,15 @@ export class DapClient {
     this.proc.stderr!.on("data", () => {
       /* o adaptador escreve diagnóstico no --log-file */
     });
+    // O log interno só serve enquanto o adaptador vive e contém o token da
+    // conexão com o AppServer: sai junto com o processo.
     this.proc.on("exit", () => {
       this.exited = true;
+      try {
+        fs.rmSync(internalLog, { force: true });
+      } catch {
+        /* ainda bloqueado pelo Windows; a varredura do próximo start remove */
+      }
       this.deliver({ event: "terminated", body: { adapterExited: true } });
       for (const resolve of this.pending.values()) resolve({ success: false, message: "debugAdapter encerrado" });
       this.pending.clear();
