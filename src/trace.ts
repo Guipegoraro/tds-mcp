@@ -4,8 +4,8 @@
  * histórico append-only por pasta de ticket + global.
  *
  * Organização: <patchesRoot>/<cliente>/<ticket>/
- *   AAAAMMDD_HHMMSS_<slug>.ptm
- *   AAAAMMDD_HHMMSS_<slug>.manifest.json
+ *   DDMMAA_HHMM_<slug>.ptm (DDMMAA_HHMMSS_ quando o nome já existe)
+ *   DDMMAA_HHMM_<slug>.manifest.json
  *   historico.jsonl
  */
 import * as fs from "node:fs";
@@ -160,8 +160,17 @@ export function currentAuthor(): string {
   return os.userInfo().username;
 }
 
+/** Segmento de pasta a partir de texto livre; vazio ou só pontos sairia da raiz. */
+function folderSegment(campo: string, valor: string): string {
+  const slug = slugify(valor);
+  if (!slug || /^\.+$/.test(slug)) {
+    throw new Error(`${campo} inválido para nome de pasta: "${valor}".`);
+  }
+  return slug;
+}
+
 export function ensurePatchDir(patchesRoot: string, cliente: string, ticket: string): string {
-  const dir = path.join(patchesRoot, slugify(cliente), slugify(ticket));
+  const dir = path.join(patchesRoot, folderSegment("cliente", cliente), folderSegment("ticket", ticket));
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

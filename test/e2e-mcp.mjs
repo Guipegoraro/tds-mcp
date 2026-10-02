@@ -41,7 +41,8 @@ function text(result) {
 }
 
 async function call(name, args = {}) {
-  console.log(`\n=== ${name} ${JSON.stringify(args).substring(0, 120)}`);
+  const visivel = args.senha ? { ...args, senha: "***" } : args;
+  console.log(`\n=== ${name} ${JSON.stringify(visivel).substring(0, 120)}`);
   const result = await mcp.callTool({ name, arguments: args });
   const parsed = text(result);
   const s = JSON.stringify(parsed, null, 2);

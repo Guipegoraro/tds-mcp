@@ -11,9 +11,18 @@
  *  2. Nível de FONTE (`compileInfos[].status`) — erro de sintaxe etc.
  *
  * Olhar apenas (2) faz uma falha de build ser reportada como sucesso. Por isso
- * o veredito exige returnCode === 0 E ausência de ERROR/FATAL.
+ * o veredito exige returnCode === 0, todo fonte com status conhecido de
+ * sucesso e um resultado para cada fonte enviado. Resposta que não comprova
+ * a compilação (vazia, nula, status desconhecido, fonte sem resultado) não é
+ * sucesso.
  */
+import * as path from "node:path";
 import type { CompileInfo, CompileResult } from "./advpls.js";
+
+/** Status por fonte que contam como compilação concluída. */
+const OK_STATUS = new Set(["SUCCESS", "WARN", "SKIPPED", "APPRE"]);
+/** Status de erro reportados pelo compilador. */
+const ERROR_STATUS = new Set(["ERROR", "FATAL"]);
 
 /** Códigos de retorno conhecidos do build, com orientação acionável. */
 export const RETURN_CODE_HINTS: Record<number, string> = {
@@ -31,6 +40,8 @@ export interface CompileVerdict {
   returnCode: number;
   /** Preenchido quando a falha é de build (returnCode != 0). */
   falhaDeBuild?: string;
+  /** Preenchido quando a resposta não comprova a compilação (vazia, status desconhecido, fonte sem resultado). */
+  inconclusivo?: string;
   /** Preenchido quando a operação passou, mas nenhum fonte foi efetivamente gravado. */
   aviso?: string;
   /** Causa provável deduzida da mensagem de erro (chave de compilação, includes...). */
@@ -39,15 +50,40 @@ export interface CompileVerdict {
   erros: CompileInfo[];
   avisos: CompileInfo[];
   ignorados: CompileInfo[];
+  /** Fontes enviados sem resultado na resposta do servidor. */
+  semResultado: string[];
 }
 
-export function compileVerdict(result: CompileResult): CompileVerdict {
-  const infos = result?.compileInfos ?? [];
-  const erros = infos.filter((i) => i.status === "ERROR" || i.status === "FATAL");
-  const avisos = infos.filter((i) => i.status === "WARN");
+/** Nome do arquivo em minúsculas, aceitando caminho ou URI file://. */
+function fileKey(p: string): string {
+  let s = String(p ?? "");
+  if (/^file:/i.test(s)) {
+    try {
+      s = decodeURIComponent(s.replace(/^file:\/*/i, ""));
+    } catch {
+      /* caminho com % literal: usa como veio */
+    }
+  }
+  return path.basename(s.replace(/\\/g, "/")).toLowerCase();
+}
+
+/**
+ * @param enviados Fontes enviados ao servidor. Quando informado, cada um
+ *   precisa ter um resultado na resposta.
+ */
+export function compileVerdict(result: CompileResult | null | undefined, enviados: string[] = []): CompileVerdict {
+  const infos = Array.isArray(result?.compileInfos) ? result!.compileInfos : [];
+  const status = (i: CompileInfo) => String(i.status ?? "").toUpperCase();
+  const erros = infos.filter((i) => ERROR_STATUS.has(status(i)));
+  // Status fora das listas conhecidas não é erro de compilação, mas também não
+  // comprova que o fonte foi gravado: torna o resultado inconclusivo.
+  const desconhecidos = infos.filter((i) => !ERROR_STATUS.has(status(i)) && !OK_STATUS.has(status(i)));
+  const avisos = infos.filter((i) => status(i) === "WARN");
   // SKIPPED: o servidor ignorou o fonte (normalmente já está atualizado no RPO
   // e recompile=false). Não é erro, mas também NÃO houve gravação.
-  const ignorados = infos.filter((i) => i.status === "SKIPPED");
+  const ignorados = infos.filter((i) => status(i) === "SKIPPED");
+  const recebidos = new Set(infos.map((i) => fileKey(i.filePath)));
+  const semResultado = enviados.filter((f) => !recebidos.has(fileKey(f)));
 
   // returnCode ausente na resposta é tratado como 0 (sucesso) para não quebrar
   // servidores/builds que omitem o campo; a checagem de ERROR/FATAL continua valendo.
@@ -70,7 +106,24 @@ export function compileVerdict(result: CompileResult): CompileVerdict {
   // Causas conhecidas que o servidor reporta apenas na mensagem do fonte.
   const causaProvavel = diagnoseKnownCauses(erros);
 
-  const sucesso = !buildFalhou && erros.length === 0;
+  // Resposta sem nenhum resultado por fonte não comprova compilação.
+  let inconclusivo: string | undefined;
+  if (!buildFalhou && infos.length === 0) {
+    inconclusivo =
+      "O servidor não devolveu resultado por fonte (resposta vazia). Não dá para afirmar que " +
+      "algo foi gravado no RPO; confira com tds_rpo_objects ou compile de novo.";
+  } else if (!buildFalhou && semResultado.length > 0) {
+    inconclusivo =
+      `O servidor não devolveu resultado para ${semResultado.length} fonte(s) enviado(s): ` +
+      `${semResultado.map((f) => path.basename(f)).join(", ")}. Não dá para afirmar que foram gravados.`;
+  }
+  if (!buildFalhou && desconhecidos.length > 0) {
+    const msg =
+      `Status não reconhecido na resposta (${[...new Set(desconhecidos.map(status))].join(", ")}): ` +
+      `tratado como falha, pois não comprova a gravação no RPO.`;
+    inconclusivo = inconclusivo ? `${inconclusivo} ${msg}` : msg;
+  }
+  const sucesso = !buildFalhou && erros.length === 0 && !inconclusivo;
 
   // Sucesso em que TUDO foi ignorado: nada foi gravado no RPO. Reportar como
   // "compilado" sem ressalva seria enganoso.
@@ -85,12 +138,14 @@ export function compileVerdict(result: CompileResult): CompileVerdict {
     sucesso,
     returnCode,
     falhaDeBuild,
+    inconclusivo,
     aviso,
     causaProvavel,
     infos,
     erros,
     avisos,
     ignorados,
+    semResultado,
   };
 }
 

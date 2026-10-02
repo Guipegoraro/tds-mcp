@@ -4,6 +4,8 @@
 // Uso: node test/e2e-debug.mjs <servidor> [ambiente]
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +22,18 @@ if (!serverName) {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "zTstDbg1.prw");
+// Linhas do fonte de teste achadas pelo conteúdo: editar o cabeçalho não quebra o E2E.
+const FONTE = fs.readFileSync(SRC, "latin1").split(/\r?\n/);
+const lineOf = (trecho) => {
+  const n = FONTE.findIndex((l) => l.includes(trecho)) + 1;
+  if (!n) throw new Error(`zTstDbg1.prw sem a linha "${trecho}"`);
+  return n;
+};
+const L_SOMA = lineOf("nTotal += zTstSoma(nI)");
+const L_NEXT = lineOf("Next nI");
+const L_NOME = lineOf("cNome := cNome");
+const L_PRIV = lineOf("nPriv += 1");
+const L_ERRO = lineOf("nVarNaoExisteE2e");
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(here, "..", "dist", "index.js")],
@@ -38,6 +52,7 @@ async function call(name, args = {}) {
   return { isError: !!r.isError, data: parsed };
 }
 
+const inicioE2e = Date.now();
 let falhas = 0;
 function check(nome, condicao, detalhe) {
   if (!condicao) falhas++;
@@ -60,7 +75,7 @@ try {
   check(
     "tds_run: erro de execução -> resultado erro com fonte/linha e detalhes",
     err.isError && err.data?.resultado === "erro" && /NVARNAOEXISTEE2E/i.test(err.data?.erro ?? "") &&
-      /ZTSTDBG1\.PRW\(39\)/i.test(err.data?.erro ?? "") && /STACK U_ZTSTDBGE/i.test(err.data?.detalhes ?? ""),
+      new RegExp(`ZTSTDBG1\\.PRW\\(${L_ERRO}\\)`, "i").test(err.data?.erro ?? "") && /STACK U_ZTSTDBGE/i.test(err.data?.detalhes ?? ""),
     short({ erro: err.data?.erro, temDetalhes: !!err.data?.detalhes })
   );
 
@@ -69,17 +84,17 @@ try {
     programa: "u_zTstDbg1",
     argumentos: ["arg-e2e"],
     breakpoints: [
-      { arquivo: SRC, linha: 23, condicao: "nI == 2" },
-      { arquivo: SRC, linha: 26, rastro: ["cArg", "nTotal", "Len(aItens)", "oJson['cliente']"] },
-      { arquivo: SRC, linha: 31, log: "logpoint nPriv={nPriv}" },
-      { arquivo: SRC, linha: 24 }, // Next: aceito pelo depurador, mas nunca para
+      { arquivo: SRC, linha: L_SOMA, condicao: "nI == 2" },
+      { arquivo: SRC, linha: L_NOME, rastro: ["cArg", "nTotal", "Len(aItens)", "oJson['cliente']"] },
+      { arquivo: SRC, linha: L_PRIV, log: "logpoint nPriv={nPriv}" },
+      { arquivo: SRC, linha: L_NEXT }, // Next: aceito pelo depurador, mas nunca para
     ],
     aguardarSeg: 60,
   });
   const st = start.data;
   check(
     "debug_start: para no breakpoint condicional (nI == 2)",
-    st?.estado === "parado" && st?.local?.linha === 23 && st?.variaveis?.Local?.NI === "N 2",
+    st?.estado === "parado" && st?.local?.linha === L_SOMA && st?.variaveis?.Local?.NI === "N 2",
     short({ estado: st?.estado, local: st?.local, NI: st?.variaveis?.Local?.NI, avisos: st?.avisos })
   );
   check("debug_start: breakpoints verificados", (st?.breakpoints?.["zTstDbg1.prw"] ?? []).every((b) => b.verificado), short(st?.breakpoints));
@@ -91,11 +106,11 @@ try {
   check("debug_start: argumento chega ao programa", /arg-e2e/.test(st?.variaveis?.Local?.CARG ?? ""), st?.variaveis?.Local?.CARG);
   check(
     "debug_start: avisa breakpoint em linha que não para (Next)",
-    (st?.avisos ?? []).some((a) => /zTstDbg1.prw:24/.test(a) && /Next/.test(a)),
+    (st?.avisos ?? []).some((a) => a.includes(`zTstDbg1.prw:${L_NEXT}`) && /Next/.test(a)),
     short(st?.avisos)
   );
   const again = await call("tds_debug_wait", { timeoutSeg: 5 });
-  check("debug_wait parado: devolve a parada atual", again.data?.estado === "parado" && again.data?.local?.linha === 23, short(again.data?.local));
+  check("debug_wait parado: devolve a parada atual", again.data?.estado === "parado" && again.data?.local?.linha === L_SOMA, short(again.data?.local));
 
   const watch = await call("tds_debug_watch", { adicionar: ["nPriv", "oJson['valor']", "Len(aItens)"] });
   check("debug_watch: registra watches", watch.data?.watches?.length === 3, short(watch.data));
@@ -144,6 +159,40 @@ try {
   const stop = await call("tds_debug_stop");
   check("debug_stop encerra", stop.data?.encerrada === true, short(stop.data));
 
+  // --- tds_debug_breakpoints: troca os breakpoints com o programa parado
+  const bp = await call("tds_debug_start", {
+    programa: "u_zTstDbg1",
+    breakpoints: [{ arquivo: SRC, linha: L_SOMA }],
+    aguardarSeg: 60,
+  });
+  check("breakpoints: para na primeira volta", bp.data?.estado === "parado" && bp.data?.local?.linha === L_SOMA, short(bp.data?.local));
+  const troca = await call("tds_debug_breakpoints", { arquivo: SRC, breakpoints: [{ linha: L_PRIV }, { linha: L_NEXT }] });
+  check(
+    "tds_debug_breakpoints substitui os do fonte e avisa linha que não para",
+    !troca.isError && troca.data?.breakpoints?.length === 2 && (troca.data?.avisos ?? []).some((a) => a.includes(`:${L_NEXT}`)),
+    short(troca.data)
+  );
+  // Com o breakpoint antigo ainda ativo, a segunda parada seria em L_SOMA (a
+  // volta seguinte do For passa nela antes de chamar zTstSoma).
+  const p1 = await call("tds_debug_step", { acao: "continuar" });
+  const v1 = (await call("tds_debug_evaluate", { expressao: "nPriv" })).data?.resultado;
+  const p2 = await call("tds_debug_step", { acao: "continuar" });
+  const v2 = (await call("tds_debug_evaluate", { expressao: "nPriv" })).data?.resultado;
+  check(
+    "duas paradas seguidas no breakpoint novo (zTstSoma), nenhuma no antigo",
+    [p1, p2].every((p) => p.data?.estado === "parado" && p.data?.local?.linha === L_PRIV && /ZTSTSOMA/i.test(p.data?.local?.funcao ?? "")) &&
+      v1 === "N 42" && v2 === "N 43",
+    short({ p1: p1.data?.local, p2: p2.data?.local, v1, v2 })
+  );
+  const limpa = await call("tds_debug_breakpoints", { arquivo: SRC, breakpoints: [] });
+  const fim = await call("tds_debug_step", { acao: "continuar" });
+  check(
+    "lista vazia remove os breakpoints e o programa termina",
+    !limpa.isError && (limpa.data?.breakpoints ?? []).length === 0 && fim.data?.estado === "encerrado",
+    short({ limpa: limpa.data, fim: fim.data?.estado })
+  );
+  await call("tds_debug_stop");
+
   // --- pausa por breakpoint incluído com o programa rodando (modo navegador = sem navegador próprio)
   const nav = await call("tds_debug_start", { programa: "u_zTstDbg1", modo: "navegador" });
   check(
@@ -170,9 +219,47 @@ try {
   const r3 = await call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 });
   check("concorrência: depois disso a vaga fica livre", r3.data?.resultado === "concluido", short(r3.data));
 
+  // --- dois processos do tds-mcp (duas sessões do Claude) executando ao mesmo tempo
+  const outro = new Client({ name: "e2e-debug-2", version: "0.0.1" });
+  await outro.connect(
+    new StdioClientTransport({ command: process.execPath, args: [path.join(here, "..", "dist", "index.js")] })
+  );
+  try {
+    const callOutro = async (name, args = {}) => {
+      const r = await outro.callTool({ name, arguments: args }, undefined, { timeout: 600000 });
+      let parsed;
+      try {
+        parsed = JSON.parse(r.content?.[0]?.text ?? "");
+      } catch {
+        parsed = r.content?.[0]?.text;
+      }
+      return { isError: !!r.isError, data: parsed };
+    };
+    await callOutro("tds_use_server", { servidor: serverName, ambiente: environment, ...credenciais });
+    const [p1, p2] = await Promise.all([
+      call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),
+      callOutro("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),
+    ]);
+    check(
+      "dois processos do tds-mcp: as duas execuções simultâneas concluem",
+      p1.data?.resultado === "concluido" && p2.data?.resultado === "concluido",
+      short([p1.data?.resultado ?? p1.data?.erro, p2.data?.resultado ?? p2.data?.erro])
+    );
+  } finally {
+    await outro.close().catch(() => {});
+  }
+
   // --- sem threads presas no servidor
   const users = await call("tds_monitor_users", { programa: "ZTSTDBG" });
   check("nenhuma thread de teste presa no servidor", (users.data?.totalFiltrado ?? 1) === 0, short(users.data?.sessoes));
+
+  // --- sem sobras locais: logs do debugAdapter (têm o token) e perfis do Chromium
+  await new Promise((r) => setTimeout(r, 2000));
+  const tmp = path.join(os.tmpdir(), "tds-mcp");
+  const recentes = (fs.existsSync(tmp) ? fs.readdirSync(tmp) : []).filter(
+    (n) => /^(debugAdapter-|chromium-profile-)/.test(n) && fs.statSync(path.join(tmp, n)).mtimeMs > inicioE2e
+  );
+  check("nenhum log de debugAdapter nem perfil de Chromium sobrando", recentes.length === 0, recentes.join(", "));
 } finally {
   await call("tds_debug_stop").catch(() => {});
   await mcp.close();

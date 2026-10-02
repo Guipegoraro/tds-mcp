@@ -357,30 +357,42 @@ export class DebugSession {
     return this.waitForStop(timeoutSeg);
   }
 
-  /** Encerra o adaptador (libera a thread no AppServer) e o navegador headless. */
+  /**
+   * Encerra o adaptador (libera a thread no AppServer) e o navegador headless,
+   * esperando os dois processos saírem: é na saída que o log do adaptador e o
+   * perfil do navegador são apagados.
+   */
   async stop(): Promise<void> {
-    if (this.dap.alive) {
-      await this.dap.request("terminate", {}, 3000);
-      await sleep(300);
-    }
-    this.dap.kill();
-    this.browser?.close();
+    // O adaptador não responde ao terminate: o pedido vai com prazo curto, para
+    // o encerramento caber nos ~2 s que o cliente MCP dá antes de matar o processo.
+    if (this.dap.alive) await this.dap.request("terminate", {}, 300);
     this.ended = true;
+    await Promise.all([this.dap.close(), this.browser?.close()]);
   }
 }
 
+/** Sequência do nome do log do adaptador dentro deste processo. */
+let logSeq = 0;
+
 /**
- * Remove logs de adaptador com mais de uma hora: sobras de processos que
- * terminaram sem limpar. O log de uma sessão viva (deste ou de outro tds-mcp)
- * está aberto pelo adaptador e o Windows recusa a remoção.
+ * Remove sobras de processos que terminaram sem limpar, com mais de uma hora:
+ * logs de adaptador e perfis do Chromium headless. O log de uma sessão viva
+ * (deste ou de outro tds-mcp) está aberto pelo adaptador e o Windows recusa a
+ * remoção. No perfil, o navegador vivo mantém o `lockfile` aberto: se ele não
+ * puder ser removido, a pasta inteira fica.
  */
-function removeStaleAdapterLogs(logDir: string): void {
+function removeStaleArtifacts(logDir: string): void {
   const limite = Date.now() - 3600_000;
   for (const name of fs.readdirSync(logDir)) {
-    if (!/^debugAdapter-\d+\.log$/.test(name)) continue;
-    const file = path.join(logDir, name);
+    const alvo = path.join(logDir, name);
     try {
-      if (fs.statSync(file).mtimeMs < limite) fs.rmSync(file, { force: true });
+      if (fs.statSync(alvo).mtimeMs >= limite) continue;
+      if (/^debugAdapter-[\d-]+\.log$/.test(name)) {
+        fs.rmSync(alvo, { force: true });
+      } else if (/^chromium-profile/.test(name)) {
+        fs.rmSync(path.join(alvo, "lockfile"), { force: true });
+        fs.rmSync(alvo, { recursive: true, force: true });
+      }
     } catch {
       /* em uso ou já removido */
     }
@@ -394,10 +406,18 @@ export class DebugManager {
   /** Vaga reservada por um start em andamento. */
   private starting?: { programa: string; servidor: string; desde: Date };
 
+  /** Sessão retirada de `current` cujo encerramento ainda está em andamento. */
+  private stopping?: DebugSession;
+  /** Sessão em inicialização: o adaptador já existe, mas ainda não é `current`. */
+  private launching?: DebugSession;
+
   constructor(private idleMinutes: number) {
+    // Último recurso na saída do processo: só dá para mandar o kill.
     const cleanup = () => {
-      this.current?.dap.kill();
-      this.current?.browser?.close();
+      for (const s of [this.current, this.stopping, this.launching]) {
+        s?.dap.kill();
+        s?.browser?.kill();
+      }
     };
     process.on("exit", cleanup);
   }
@@ -439,10 +459,31 @@ export class DebugManager {
     if (this.current) await this.stop();
     const logDir = path.join(os.tmpdir(), "tds-mcp");
     fs.mkdirSync(logDir, { recursive: true });
-    removeStaleAdapterLogs(logDir);
-    const dap = new DapClient(opts.adapterPath, path.join(logDir, `debugAdapter-${Date.now()}.log`));
+    removeStaleArtifacts(logDir);
+    // Nome único entre processos: dois tds-mcp iniciando no mesmo milissegundo
+    // não podem dividir o arquivo de onde a URL do webapp é lida.
+    const logName = `debugAdapter-${process.pid}-${Date.now()}-${++logSeq}.log`;
+    const dap = new DapClient(opts.adapterPath, path.join(logDir, logName));
     const session = new DebugSession(dap, opts);
+    this.launching = session;
+    try {
+      return await this.connectSession(session, opts, logDir);
+    } catch (err) {
+      // Qualquer falha no meio da inicialização encerra o adaptador e o
+      // navegador: conectados, segurariam a execução no AppServer.
+      await session.stop();
+      throw err;
+    } finally {
+      if (this.launching === session) this.launching = undefined;
+    }
+  }
 
+  private async connectSession(
+    session: DebugSession,
+    opts: StartOptions,
+    logDir: string
+  ): Promise<{ session: DebugSession; breakpoints: Record<string, unknown> }> {
+    const dap = session.dap;
     const init = await dap.request("initialize", {
       clientID: "tds-mcp",
       clientName: "tds-mcp",
@@ -455,14 +496,14 @@ export class DebugManager {
       locale: "pt-br",
     });
     if (!init.success) {
-      dap.kill();
       throw new Error(`O debugAdapter não inicializou: ${init.message ?? "sem detalhe"}`);
     }
 
     // "Navegador" do adaptador: processo que só fica vivo enquanto o adaptador
-    // existir (se ele sair, o adaptador encerra a sessão).
+    // existir (se ele sair, o adaptador encerra a sessão). Ele herda o handle
+    // do log do adaptador, então confere o pai a cada 250 ms para soltá-lo logo.
     const keepAlive =
-      "const p=process.ppid;setInterval(()=>{try{process.kill(p,0)}catch{process.exit(0)}},2000)";
+      "const p=process.ppid;setInterval(()=>{try{process.kill(p,0)}catch{process.exit(0)}},250)";
     const launch = dap.request(
       "launch",
       {
@@ -491,7 +532,6 @@ export class DebugManager {
     const initialized = await dap.waitFor(["initialized", "terminated"], 60000);
     if (!initialized || initialized.event !== "initialized") {
       const logs = dap.logsSince(0).map((l) => l.mensagem).join(" | ");
-      dap.kill();
       throw new Error(`O debugAdapter não conectou no AppServer. ${logs}`.trim());
     }
     const breakpoints: Record<string, unknown> = {};
@@ -501,33 +541,38 @@ export class DebugManager {
     await dap.request("configurationDone");
     const launched = await launch;
     if (!launched.success) {
-      dap.kill();
       throw new Error(`O debugAdapter recusou o launch: ${launched.message ?? "sem detalhe"}`);
     }
     session.url = await session.readWebappUrl();
     if (!session.url) {
       const logs = dap.logsSince(0).map((l) => l.mensagem).join(" | ");
-      await session.stop();
       throw new Error(`O debugAdapter não informou a URL do webapp. ${logs}`.trim());
     }
     if (opts.modo !== "navegador") {
-      session.browser = await HeadlessWebapp.open(
-        opts.chromiumPath!,
-        session.url,
-        path.join(logDir, "chromium-profile")
-      );
+      session.browser = await HeadlessWebapp.open(opts.chromiumPath!, session.url, logDir);
     }
+    // tds_debug_stop (ou o encerramento do MCP) durante a inicialização mata o
+    // adaptador sem erro aqui: a sessão não pode virar a ativa; o catch do
+    // launchSession fecha o navegador recém-aberto.
+    if (session.encerrada) throw new Error("A sessão de depuração foi encerrada durante a inicialização.");
     this.current = session;
     this.armIdleTimer();
     return { session, breakpoints };
   }
 
+  /** Encerra a sessão ativa e a que estiver em inicialização. */
   async stop(): Promise<boolean> {
     const s = this.current;
+    const launching = this.launching;
     this.current = undefined;
     if (this.idleTimer) clearInterval(this.idleTimer);
-    if (!s) return false;
-    await s.stop();
+    if (!s && !launching) return false;
+    this.stopping = s;
+    try {
+      await Promise.all([s?.stop(), launching?.stop()]);
+    } finally {
+      if (this.stopping === s) this.stopping = undefined;
+    }
     return true;
   }
 
@@ -536,7 +581,10 @@ export class DebugManager {
     this.idleTimer = setInterval(() => {
       const s = this.current;
       if (!s) return;
-      if (Date.now() - s.lastActivity > this.idleMinutes * 60000) void this.stop();
+      // No modo navegador o uso das telas pelo chrome-devtools não passa pelo
+      // tds-mcp e não conta como atividade: o prazo é o triplo.
+      const limite = this.idleMinutes * (s.modo === "navegador" ? 3 : 1) * 60000;
+      if (Date.now() - s.lastActivity > limite) void this.stop();
     }, 30000);
     this.idleTimer.unref();
   }

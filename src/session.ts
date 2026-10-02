@@ -82,13 +82,25 @@ export function readServersJson(): ServersJson {
   return JSON.parse(raw) as ServersJson;
 }
 
+/**
+ * Servidor por id, nome exato (sem diferenciar maiúsculas) ou parte única do
+ * nome. Parte do nome que casa com mais de um servidor é recusada: conectar no
+ * primeiro da lista poderia levar um patch para o ambiente errado.
+ */
 export function findServer(cfg: ServersJson, nameOrId: string): TdsServerDef | undefined {
   const needle = nameOrId.toLowerCase();
-  return (
+  const exact =
     cfg.configurations.find((s) => s.id === nameOrId) ??
-    cfg.configurations.find((s) => s.name.toLowerCase() === needle) ??
-    cfg.configurations.find((s) => s.name.toLowerCase().includes(needle))
-  );
+    cfg.configurations.find((s) => s.name.toLowerCase() === needle);
+  if (exact) return exact;
+  const partial = cfg.configurations.filter((s) => s.name.toLowerCase().includes(needle));
+  if (partial.length > 1) {
+    throw new Error(
+      `"${nameOrId}" casa com ${partial.length} servidores: ${partial.map((s) => s.name).join(", ")}. ` +
+        `Informe o nome completo.`
+    );
+  }
+  return partial[0];
 }
 
 /** Token global de autorização de compilação (compile key/token) do TDS, se houver. */
@@ -106,15 +118,19 @@ export function effectiveIncludes(cfg: ServersJson, def: TdsServerDef): string[]
  * Token de reconexão salvo pelo TDS para um servidor: campo `token` da própria
  * configuração ou entrada em `savedTokens` (chave "<id><environment>").
  */
-function savedTokenFor(cfg: ServersJson, def: TdsServerDef, environment: string): string | undefined {
+export function savedTokenFor(cfg: ServersJson, def: TdsServerDef, environment: string): string | undefined {
   if (Array.isArray(cfg.savedTokens)) {
     for (const entry of cfg.savedTokens) {
       const [key, value] = entry;
       if (key === def.id + environment && value?.token) return value.token;
     }
   }
-  if (def.token && (def.environment === environment || !def.environment)) return def.token;
-  return def.token;
+  // O token da própria configuração é o da última conexão do TDS, no ambiente
+  // registrado em def.environment.
+  if (def.token && (!def.environment || def.environment.toLowerCase() === environment.toLowerCase())) {
+    return def.token;
+  }
+  return undefined;
 }
 
 export class SessionManager {
@@ -241,6 +257,7 @@ export class SessionManager {
           build,
           secure,
           environment: env,
+          serverType: serverTypeCode(def.type),
         });
         if (fresh.connectionToken) authConnToken = fresh.connectionToken;
       }

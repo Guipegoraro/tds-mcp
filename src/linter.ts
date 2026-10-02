@@ -1,8 +1,8 @@
 /**
  * Verificação de sintaxe pelo linter do advpls (TDS Language Server).
  *
- * No tds-ls 2.2.x o modo syntaxOnly da compilação deixou de passar pelo
- * AppServer: a análise é do linter local, que só publica resultado
+ * No tds-ls 2.2.x o modo syntaxOnly da compilação não passa pelo AppServer:
+ * a análise é do linter local, que só publica resultado
  * (textDocument/publishDiagnostics) para arquivo aberto num workspace LSP.
  * Por isso a verificação sobe um advpls próprio, com handshake LSP completo
  * — initialize com capacidades mínimas derruba o processo —, abre cada fonte
@@ -38,6 +38,9 @@ const COMPILER_WARNINGS: { pattern: RegExp; codigo: string }[] = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Fontes AdvPL são Windows-1252: € e aspas curvas (0x80-0x9F) não existem em latin1. */
+const CP1252 = new TextDecoder("windows-1252");
+
 export async function lintFiles(
   advplsPath: string,
   files: string[],
@@ -48,10 +51,24 @@ export async function lintFiles(
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
-  // Escrita depois que o processo saiu gera EPIPE; não pode derrubar o MCP.
+  // Falha no spawn e escrita depois que o processo saiu (EPIPE) não podem
+  // derrubar o MCP; sem resposta, os fontes saem em semResposta.
+  proc.on("error", () => {});
   proc.stdin!.on("error", () => {});
+  proc.stderr!.on("data", () => {});
   const conn = createMessageConnection(new StreamMessageReader(proc.stdout!), new StreamMessageWriter(proc.stdin!));
   conn.onError(() => {});
+  // A escrita da notificação é aguardada (o didClose sai antes do kill do
+  // finally) e a falha é absorvida: só ocorre com o advpls já encerrado, e uma
+  // rejeição sem tratamento derrubaria o MCP. Devolve false quando não escreveu.
+  const notify = async (method: string, params: unknown): Promise<boolean> => {
+    try {
+      await conn.sendNotification(method, params);
+      return true;
+    } catch {
+      return false; // inclui a conexão já fechada, que lança antes de escrever
+    }
+  };
   const received = new Map<string, { at: number; diagnostics: any[] }>();
   conn.onRequest("workspace/configuration", (p: { items?: unknown[] }) => (p?.items ?? []).map(() => null));
   conn.onRequest(() => null);
@@ -108,22 +125,29 @@ export async function lintFiles(
       30000,
       "O language server não respondeu ao initialize."
     );
-    conn.sendNotification("initialized", {});
+    await notify("initialized", {});
 
     const diagnosticos: LintDiagnostic[] = [];
     const semResposta: string[] = [];
-    for (const file of files) {
+    for (const [i, file] of files.entries()) {
       const key = path.resolve(file).toLowerCase();
       const uri = URI.file(file).toString();
-      conn.sendNotification("textDocument/didOpen", {
-        textDocument: { uri, languageId: "advpl", version: 1, text: fs.readFileSync(file, "latin1") },
+      const aberto = await notify("textDocument/didOpen", {
+        textDocument: { uri, languageId: "advpl", version: 1, text: CP1252.decode(fs.readFileSync(file)) },
       });
+      // advpls encerrado: este e os demais fontes ficam sem resposta, e o que
+      // já foi colhido é devolvido.
+      if (!aberto) {
+        semResposta.push(...files.slice(i));
+        break;
+      }
       const deadline = Date.now() + timeoutPerFileMs;
-      while (!received.has(key) && Date.now() < deadline) await sleep(100);
+      const vivo = () => proc.exitCode === null && Date.now() < deadline;
+      while (!received.has(key) && vivo()) await sleep(100);
       // O linter pode publicar mais de uma vez: espera a última assentar.
-      while (received.has(key) && Date.now() - received.get(key)!.at < 600 && Date.now() < deadline) await sleep(100);
+      while (received.has(key) && Date.now() - received.get(key)!.at < 600 && vivo()) await sleep(100);
       const got = received.get(key);
-      conn.sendNotification("textDocument/didClose", { textDocument: { uri } });
+      await notify("textDocument/didClose", { textDocument: { uri } });
       if (!got) {
         semResposta.push(file);
         continue;

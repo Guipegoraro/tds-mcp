@@ -158,6 +158,14 @@ export interface ServerPermissionsResult {
 
 export const CONN_TYPE = { DEBUGGER: 3, MONITOR: 13 } as const;
 
+/** Requests que podem levar minutos (pasta grande, patch grande): prazo de 30 min; os demais, 5 min. */
+const LONG_REQUESTS = new Set([
+  "$totvsserver/compilation",
+  "$totvsserver/patchGenerate",
+  "$totvsserver/patchApply",
+  "$totvsserver/patchInfo",
+]);
+
 // ---------------------------------------------------------------------------
 // Localização do binário
 // ---------------------------------------------------------------------------
@@ -179,10 +187,18 @@ export function compareVersions(a: string, b: string): number {
  * VS Code mantém a versão anterior na pasta por um tempo após atualizar).
  */
 export function resolveAdvplsPath(configured?: string): string {
-  if (configured && fs.existsSync(configured)) return configured;
+  // Caminho escolhido explicitamente e ausente é erro: cair na detecção
+  // automática usaria outro binário sem o usuário saber.
+  if (configured) {
+    if (isFile(configured)) return configured;
+    throw new Error(`advplsPath do config do tds-mcp não existe ou não é arquivo: ${configured}`);
+  }
 
   const fromEnv = process.env.TDS_MCP_ADVPLS;
-  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  if (fromEnv) {
+    if (isFile(fromEnv)) return fromEnv;
+    throw new Error(`TDS_MCP_ADVPLS não existe ou não é arquivo: ${fromEnv}`);
+  }
 
   const extDir = path.join(os.homedir(), ".vscode", "extensions");
   const binRel = path.join("node_modules", "@totvs", "tds-ls", "bin", "windows", "advpls.exe");
@@ -202,6 +218,11 @@ export function resolveAdvplsPath(configured?: string): string {
     "advpls.exe não encontrado. Instale a extensão totvs.tds-vscode no VS Code, " +
       "ou informe o caminho em TDS_MCP_ADVPLS / config advplsPath."
   );
+}
+
+/** Caminho existe e é arquivo (não pasta). */
+export function isFile(p: string): boolean {
+  return fs.statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
 }
 
 export interface AdvplsBinaryInfo {
@@ -245,8 +266,12 @@ export class AdvplsClient {
   private proc: ChildProcess;
   private conn: MessageConnection;
   private disposed = false;
+  /** Motivo de o advpls não estar disponível, devolvido nos requests seguintes. */
+  private exitReason = "advpls não está em execução";
   /** Últimas mensagens de log/console enviadas pelo servidor (janela circular). */
   readonly serverLog: string[] = [];
+  /** Total de mensagens já recebidas; marca de posição para logSince(). */
+  logCount = 0;
 
   private constructor(proc: ChildProcess, conn: MessageConnection) {
     this.proc = proc;
@@ -280,9 +305,20 @@ export class AdvplsClient {
 
     conn.listen();
 
+    // Sem estes handlers, falha no spawn ou EPIPE na escrita derrubariam o
+    // processo do MCP inteiro. O stderr é drenado para o pipe não encher.
+    proc.on("error", (err) => {
+      client.exitReason = `advpls não pôde ser executado: ${err.message}`;
+      client.pushLog(client.exitReason);
+      client.dispose();
+    });
+    proc.stdin!.on("error", () => {});
+    proc.stderr!.on("data", () => {});
+    // dispose() rejeita os requests pendentes; sem ele, a tool em andamento
+    // ficaria esperando para sempre a resposta de um processo morto.
     proc.on("exit", (code) => {
-      client.disposed = true;
       client.pushLog(`advpls encerrou com código ${code}`);
+      client.dispose();
     });
 
     // Sem handshake LSP: o advpls aceita os requests $totvsserver/* diretamente
@@ -293,8 +329,15 @@ export class AdvplsClient {
 
   private pushLog(message?: string): void {
     if (!message) return;
+    this.logCount++;
     this.serverLog.push(message);
     if (this.serverLog.length > 200) this.serverLog.shift();
+  }
+
+  /** Mensagens recebidas depois da marca `logCount` informada (as que ainda estão na janela). */
+  logSince(mark: number): string[] {
+    const novas = this.logCount - mark;
+    return novas > 0 ? this.serverLog.slice(-novas) : [];
   }
 
   get alive(): boolean {
@@ -302,8 +345,28 @@ export class AdvplsClient {
   }
 
   request<T>(method: string, params: unknown): Promise<T> {
-    if (this.disposed) return Promise.reject(new Error("advpls não está em execução"));
-    return this.conn.sendRequest(method, params) as Promise<T>;
+    if (this.disposed) return Promise.reject(new Error(this.exitReason));
+    const longo = LONG_REQUESTS.has(method);
+    const timeoutMs = longo ? 30 * 60_000 : 5 * 60_000;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `${method} sem resposta do advpls em ${timeoutMs / 60_000} min.` +
+                (longo
+                  ? " A operação pode continuar no servidor e ainda gravar no RPO: confira com " +
+                    "tds_rpo_objects antes de repetir."
+                  : "")
+            )
+          ),
+        timeoutMs
+      );
+    });
+    return Promise.race([this.conn.sendRequest(method, params) as Promise<T>, timeout]).finally(() =>
+      clearTimeout(timer)
+    );
   }
 
   // ------------------------------------------------------------------

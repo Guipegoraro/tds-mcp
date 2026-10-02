@@ -9,6 +9,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isFile } from "./advpls.js";
+import { waitExit } from "./webapp.js";
 
 export interface DapEvent {
   event: string;
@@ -28,9 +30,16 @@ export interface DapResponse {
  * (<ext>/node_modules/@totvs/tds-ls/bin/windows -> .../@totvs/tds-da/bin/windows).
  */
 export function resolveDebugAdapterPath(advplsPath: string, configured?: string): string {
-  if (configured && fs.existsSync(configured)) return configured;
+  // Caminho escolhido explicitamente e ausente é erro, não motivo para usar outro binário.
+  if (configured) {
+    if (isFile(configured)) return configured;
+    throw new Error(`debugAdapterPath do config do tds-mcp não existe ou não é arquivo: ${configured}`);
+  }
   const fromEnv = process.env.TDS_MCP_DEBUG_ADAPTER;
-  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  if (fromEnv) {
+    if (isFile(fromEnv)) return fromEnv;
+    throw new Error(`TDS_MCP_DEBUG_ADAPTER não existe ou não é arquivo: ${fromEnv}`);
+  }
   const totvsDir = path.resolve(path.dirname(advplsPath), "..", "..", "..");
   const candidate = path.join(totvsDir, "tds-da", "bin", "windows", "debugAdapter.exe");
   if (fs.existsSync(candidate)) return candidate;
@@ -49,6 +58,8 @@ export class DapClient {
   private buf = Buffer.alloc(0);
   private pending = new Map<number, (r: DapResponse) => void>();
   private waiters: { names: string[]; resolve: (e: DapEvent) => void }[] = [];
+  /** Motivo do fim do processo, usado nas respostas dos pedidos pendentes. */
+  private exitReason = "debugAdapter encerrado";
   private exited = false;
 
   constructor(adapterPath: string, internalLog: string) {
@@ -62,19 +73,28 @@ export class DapClient {
     this.proc.stderr!.on("data", () => {
       /* o adaptador escreve diagnóstico no --log-file */
     });
-    // O log interno só serve enquanto o adaptador vive e contém o token da
-    // conexão com o AppServer: sai junto com o processo.
-    this.proc.on("exit", () => {
-      this.exited = true;
-      try {
-        fs.rmSync(internalLog, { force: true });
-      } catch {
-        /* ainda bloqueado pelo Windows; a varredura do próximo start remove */
-      }
-      this.deliver({ event: "terminated", body: { adapterExited: true } });
-      for (const resolve of this.pending.values()) resolve({ success: false, message: "debugAdapter encerrado" });
-      this.pending.clear();
+    // Falha no spawn e EPIPE na escrita (adaptador morrendo) chegam como
+    // "error"; sem handler derrubariam o processo do MCP.
+    this.proc.stdin!.on("error", () => {});
+    this.proc.on("error", (err) => {
+      this.exitReason = `debugAdapter não pôde ser executado: ${err.message}`;
+      this.onExit();
     });
+    this.proc.on("exit", () => this.onExit());
+  }
+
+  /**
+   * Fim do processo: encerra a sessão e responde os pedidos pendentes. O log
+   * interno só serve enquanto o adaptador vive e contém o token da conexão com
+   * o AppServer, então sai junto.
+   */
+  private onExit(): void {
+    if (this.exited) return;
+    this.exited = true;
+    this.removeLog();
+    this.deliver({ event: "terminated", body: { adapterExited: true } });
+    for (const resolve of this.pending.values()) resolve({ success: false, message: this.exitReason });
+    this.pending.clear();
   }
 
   get alive(): boolean {
@@ -82,7 +102,7 @@ export class DapClient {
   }
 
   request(command: string, args: unknown = {}, timeoutMs = 30000): Promise<DapResponse> {
-    if (this.exited) return Promise.resolve({ success: false, message: "debugAdapter encerrado" });
+    if (this.exited) return Promise.resolve({ success: false, message: this.exitReason });
     const seq = this.seq++;
     const body = Buffer.from(JSON.stringify({ seq, type: "request", command, arguments: args }), "utf8");
     this.proc.stdin!.write(`Content-Length: ${body.length}\r\n\r\n`);
@@ -138,6 +158,25 @@ export class DapClient {
     }
   }
 
+  /** Encerra o adaptador e espera ele sair (até 3 s), quando o log interno é apagado. */
+  async close(): Promise<void> {
+    this.kill();
+    await waitExit(this.proc, 3000);
+    // O "navegador" lançado pelo adaptador herda o handle do log e só o solta
+    // quando percebe que o pai saiu (intervalo do keepAlive): tenta de novo.
+    for (let i = 0; i < 12 && !this.removeLog(); i++) await new Promise((r) => setTimeout(r, 250));
+  }
+
+  /** Apaga o log interno; false enquanto o Windows mantém o arquivo bloqueado. */
+  private removeLog(): boolean {
+    try {
+      fs.rmSync(this.internalLog, { force: true });
+      return true;
+    } catch {
+      return false; // a varredura do próximo start remove o que sobrar
+    }
+  }
+
   private deliver(event: DapEvent): void {
     const waiter = this.waiters.find((w) => w.names.includes(event.event));
     if (waiter) {
@@ -160,8 +199,14 @@ export class DapClient {
       }
       const len = Number(match[1]);
       if (this.buf.length < head + 4 + len) return;
-      const msg = JSON.parse(this.buf.subarray(head + 4, head + 4 + len).toString("utf8"));
+      const raw = this.buf.subarray(head + 4, head + 4 + len).toString("utf8");
       this.buf = this.buf.subarray(head + 4 + len);
+      let msg: any;
+      try {
+        msg = JSON.parse(raw);
+      } catch {
+        continue; // mensagem malformada: descartada sem derrubar a leitura das seguintes
+      }
       if (msg.type === "response") {
         this.pending.get(msg.request_seq)?.({ success: !!msg.success, message: msg.message, body: msg.body });
         this.pending.delete(msg.request_seq);

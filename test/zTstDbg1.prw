@@ -1,11 +1,16 @@
-#include "protheus.ch"
+#include "totvs.ch"
 
-/*/{Protheus.doc} zTstDbg1
-Fonte de teste do E2E de depuracao do tds-mcp: locais, privadas, publica,
-estatica, array, JSON e chamada aninhada. Inofensivo; nao grava nada.
-/*/
 Static cStatico := "valor estatico"
 
+/*/{Protheus.doc} zTstDbg1
+Fonte de teste do E2E de depuracao do tds-mcp: locais, privadas, estatica,
+array, JSON e chamada aninhada. Inofensivo; nao grava nada.
+@type user function
+@author tds-mcp
+@since 02/10/2026
+@param cArg, character, texto qualquer (padrao "sem argumento")
+@return numeric, soma dos dobros de 1 a 3 (12)
+/*/
 User Function zTstDbg1(cArg)
     Local nI       := 0
     Local nTotal   := 0
@@ -26,6 +31,14 @@ User Function zTstDbg1(cArg)
     cNome := cNome + " " + cArg + " " + cStatico + " " + cValToChar(Len(aItens))
 Return nTotal
 
+/*/{Protheus.doc} zTstSoma
+Dobra o valor e incrementa a privada nPriv do chamador.
+@type static function
+@author tds-mcp
+@since 02/10/2026
+@param nValor, numeric, valor a dobrar
+@return numeric, nValor * 2
+/*/
 Static Function zTstSoma(nValor)
     Local nDobro := nValor * 2
     nPriv += 1
@@ -33,6 +46,10 @@ Return nDobro
 
 /*/{Protheus.doc} zTstDbgE
 Gera erro de execucao proposital (variavel inexistente) para o E2E.
+@type user function
+@author tds-mcp
+@since 02/10/2026
+@return numeric, nunca retorna: a linha do erro interrompe a execucao
 /*/
 User Function zTstDbgE()
     Local nA := 10

@@ -22,6 +22,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const okFile = path.join(here, "zTstMcp1.prw");
 const badFile = path.join(here, "zTstE2eRo.prw");
 const forFile = path.join(here, "zTstE2eFor.prw");
+const mistoFile = path.join(here, "zTstE2eMx.prw");
 fs.writeFileSync(
   forFile,
   '#include "protheus.ch"\r\n\r\nUser Function zTstE2eFor()\r\n    Private nK := 0\r\n    For nK := 1 To 2\r\n        nK := nK\r\n    Next nK\r\nReturn nK\r\n',
@@ -52,6 +53,7 @@ async function call(name, args = {}) {
 }
 
 let falhas = 0;
+const short = (v) => String(JSON.stringify(v)).slice(0, 300);
 function check(nome, condicao, detalhe) {
   if (!condicao) falhas++;
   console.log(`${condicao ? "PASS" : "FAIL"}  ${nome}${detalhe ? `\n      ${detalhe}` : ""}`);
@@ -88,12 +90,34 @@ try {
     JSON.stringify(forRes.data?.diagnosticos)
   );
 
+  // Fonte CP1252 com uma linha só com a sequência UTF-8 (tabela de conversão)
+  fs.writeFileSync(
+    mistoFile,
+    Buffer.concat([
+      Buffer.from(
+        '#include "totvs.ch"\r\n\r\nUser Function zTstE2eMx()\r\n    Local cA := "Inclus\xe3o"\r\n    Local aTab := {}\r\n    aAdd(aTab, {"',
+        "latin1"
+      ),
+      Buffer.from([0xc3, 0xa7]),
+      Buffer.from('", "c"})\r\nReturn aTab\r\n', "latin1"),
+    ])
+  );
+  const mx = await call("tds_syntax_check", { arquivos: [mistoFile] });
+  check("fonte misto é bloqueado apontando a linha", mx.isError && /misto|UTF-8 nas linhas/.test(JSON.stringify(mx.data)), short(mx.data));
+  const mxOk = await call("tds_syntax_check", { arquivos: [mistoFile], aceitarMisto: true });
+  check(
+    "aceitarMisto libera e lista o que foi liberado",
+    !!mxOk.data?.encodingMistoAceito?.length && typeof mxOk.data?.sintaxeOk === "boolean",
+    short({ sintaxeOk: mxOk.data?.sintaxeOk, encodingMistoAceito: mxOk.data?.encodingMistoAceito })
+  );
+
   const objs = await call("tds_rpo_objects", { filtro: "ZTSTMCP", limite: 3 });
   check("inspetor de RPO responde", typeof objs.data?.totalNoRPO === "number", `${objs.data?.totalNoRPO} objetos no RPO`);
 } finally {
   await mcp.close().catch(() => {});
   fs.rmSync(badFile, { force: true });
   fs.rmSync(forFile, { force: true });
+  fs.rmSync(mistoFile, { force: true });
 }
 
 console.log(falhas === 0 ? "\nE2E READ-ONLY OK" : `\n${falhas} VERIFICACAO(OES) FALHARAM`);

@@ -77,8 +77,8 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | Tool | Descrição | Efeito |
 |---|---|---|
 | `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
-| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados) | sessão |
-| `tds_compile` | Compila fontes/pastas no RPO | **grava no RPO** |
+| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada | sessão |
+| `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`) | **grava no RPO** |
 | `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
 | `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`) | nenhum |
 | `tds_rpo_objects` | Lista objetos do RPO (filtro + datas) | read-only |
@@ -191,6 +191,13 @@ Como agentes de IA gravam em UTF-8 por padrão, `tds_compile` e `tds_syntax_chec
 - arquivo 100% ASCII → passa (é idêntico nos dois encodings)
 - bytes altos que **não** formam UTF-8 válido → assume CP1252 → passa
 - UTF-8 válido com acentos, ou BOM UTF-8 → **bloqueia**, dizendo qual arquivo e como converter
+- CP1252 com trechos em UTF-8 (agente editou parte de um fonte CP1252) → **bloqueia** e aponta
+  as linhas; converter o arquivo inteiro corromperia os acentos que já estavam certos. Linha que
+  também tem acento CP1252 (ex.: `StrTran(cTxt, "Ã§", "ç")`) não conta. Quando a sequência é
+  intencional (tabela de conversão de UTF-8), o usuário confirma as linhas e o agente repete com
+  `aceitarMisto: true`; `tds_compile` e `tds_syntax_check` listam o que foi liberado em
+  `encodingMistoAceito`
+- UTF-16 (BOM `FF FE`/`FE FF` ou bytes nulos, saída padrão do `Out-File` do PowerShell 5) → **bloqueia**
 
 O arquivo **nunca é alterado** pelo MCP — a conversão é decisão sua (`convert_encoding` do
 MCP file-tools, ou *Save with Encoding → Windows 1252* no VS Code). Recursos binários
@@ -256,15 +263,21 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
   O arquivo fica fora do repositório; nunca o versione.
 - `webappUrls` — URL do webapp por servidor, quando não for `http(s)://<endereço>:<porta>/webapp/`
   (porta multiprotocolo)
-- `debugIdleMinutes` — minutos sem uso até a sessão de depuração encerrar (padrão 10)
+- `debugIdleMinutes` — minutos sem uso até a sessão de depuração encerrar (padrão 10; no modo
+  navegador vale o triplo, porque o uso das telas pelo chrome-devtools não passa pelo tds-mcp)
 - `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
   encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`)
+
+Um caminho informado (`advplsPath`, `debugAdapterPath`, `chromiumPath` ou as variáveis de
+ambiente) que não existe é erro: o tds-mcp não troca por outro binário sem avisar. Campo com
+tipo errado ou JSON inválido no config é ignorado com aviso em `avisosConfig` do `tds_server_log`.
 
 ## Desenvolvimento e testes
 
 ```bash
 npm run build                                  # compila TypeScript
-npm test                                       # testes de lógica (não precisa de AppServer)
+npm test                                       # testes de lógica e do linter local (não precisa de AppServer;
+                                               # o do linter usa o advpls da extensão TDS e é pulado sem ela)
 
 node test/smoke.mjs <servidor> [ambiente]      # read-only: conecta e inspeciona o RPO
 node test/debug-protocol.mjs [host] [porta]    # JSON-RPC cru (diagnóstico de protocolo)
@@ -272,6 +285,7 @@ node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada c
 node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MCP
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
+node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO
@@ -285,17 +299,22 @@ em ambiente de desenvolvimento descartável** e rode o cleanup depois.
 
 ## Limitações
 
-- **Verificação de sintaxe**: no tds-ls 2.2.x o modo `syntaxOnly` da compilação deixou de passar
-  pelo AppServer (vira o linter local, que só reporta para arquivo aberto num workspace LSP). Por
-  isso `tds_syntax_check` sobe um language server próprio, abre os fontes e colhe os diagnósticos
-  do linter, com as pastas de include do servidor. O linter é mais rigoroso que o compilador em
-  alguns casos (ex.: `For` com variável não Local vira aviso W0004 na compilação; o tds-mcp
-  rebaixa esse caso); na dúvida, compile num ambiente de desenvolvimento.
+- **Verificação de sintaxe**: no tds-ls 2.2.x o modo `syntaxOnly` da compilação não passa pelo
+  AppServer (é o linter local, que só reporta para arquivo aberto num workspace LSP). Por isso
+  `tds_syntax_check` sobe um language server próprio, abre os fontes e colhe os diagnósticos do
+  linter, com as pastas de include do servidor (sem elas o linter não acha nem o `PRTOPDEF.CH`
+  implícito; pasta que não existe na máquina sai em `includesAusentes`). O linter é mais rigoroso
+  que o compilador em alguns casos (ex.: `For` com variável não Local vira aviso W0004 na
+  compilação; o tds-mcp rebaixa esse caso); na dúvida, compile num ambiente de desenvolvimento.
 
 - **Windows apenas** por enquanto: a resolução do binário procura
   `bin/windows/advpls.exe` na extensão tds-vscode. O `advpls` existe para Linux e macOS
   (`@totvs/tds-ls`), então o suporte é uma mudança pequena em `resolveAdvplsPath()` —
   PRs bem-vindos.
+- **Prazos do advpls**: compilação e patch (gerar, aplicar, validar, ler) têm 30 min para
+  responder; os demais pedidos, 5 min. O prazo não cancela nada no servidor: depois de um
+  timeout de compilação o build pode continuar e gravar no RPO, então confira com
+  `tds_rpo_objects` antes de repetir.
 - **O protocolo `$totvsserver/*` não é um contrato público da TOTVS.** Ao atualizar a
   extensão TDS, o binário muda junto; se algo quebrar, `tds_server_log` ajuda a
   diagnosticar. A especificação viva é
@@ -303,8 +322,8 @@ em ambiente de desenvolvimento descartável** e rode o cleanup depois.
 - O advpls **não aceita** o handshake LSP `initialize` com params mínimos (derruba o
   processo com `0xC0000409`). Os requests `$totvsserver/*` são enviados diretamente — é o
   que o `@totvs/tds-languageclient` oficial também faz.
-- Fora do escopo da v1 (mas mapeados no protocolo): monitor de usuários conectados,
-  `defragRPO`, `rpoCheckIntegrity`, `deletePrograms`, `wsdlGenerate`.
+- Fora do escopo (mas mapeados no protocolo): `defragRPO`, `rpoCheckIntegrity`,
+  `deletePrograms`, `wsdlGenerate`.
 
 ## Alternativas headless
 

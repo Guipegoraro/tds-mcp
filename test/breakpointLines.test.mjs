@@ -56,6 +56,34 @@ for (const n of para) {
   if (!ok) falhas++;
   console.log(`${ok ? "PASS" : "FAIL"}  linha ${n} sem aviso (para): ${fonte.split("\r\n")[n - 1].trim()}`);
 }
+// Comentário de bloco: "/*" depois de "//" ou dentro de string não abre bloco
+{
+  const f2 = path.join(dir, "zLin2.prw");
+  fs.writeFileSync(
+    f2,
+    [
+      "User Function zLin2()", //           1 declaração
+      "    Local cX := '/* nao e bloco'", // 2 para
+      "    // ver /* nota", //               3 comentário
+      "    cX := 'a'", //                    4 para (não está em bloco)
+      "    /* abre", //                      5 comentário
+      "    fecha */ cX := 'b'", //           6 para (código depois do fecho)
+      "    Begin Transaction", //            7 para (BeginTran)
+      "    End Transaction", //              8 para (EndTran)
+      "    End", //                          9 não para (fecha bloco)
+      "Return cX", //                       10 para
+    ].join("\r\n"),
+    "latin1"
+  );
+  const esperado = { 1: 1, 2: 0, 3: 1, 4: 0, 5: 1, 6: 0, 7: 0, 8: 0, 9: 1, 10: 0 };
+  for (const [n, qtd] of Object.entries(esperado)) {
+    const got = breakpointLineWarnings(f2, [Number(n)]).length;
+    const ok = got === qtd;
+    if (!ok) falhas++;
+    console.log(`${ok ? "PASS" : "FAIL"}  zLin2 linha ${n}: ${qtd ? "avisa" : "sem aviso"} (obtido ${got})`);
+  }
+}
+
 const fora = breakpointLineWarnings(file, [99]);
 if (!(fora.length === 1 && /não existe/.test(fora[0]))) falhas++;
 console.log(`${fora.length === 1 ? "PASS" : "FAIL"}  linha além do fim avisa`);

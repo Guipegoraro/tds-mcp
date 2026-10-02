@@ -27,8 +27,8 @@ import { resolveChromiumPath } from "./webapp.js";
 import { lintFiles } from "./linter.js";
 import { DebugManager, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
-import { checkFiles, encodingErrorMessage } from "./encoding.js";
-import { loadConfig, configFilePath } from "./config.js";
+import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding.js";
+import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
   SessionManager,
   readServersJson,
@@ -68,13 +68,22 @@ let session: SessionManager | undefined;
 /** Binário do advpls em execução (o resolvido na última inicialização). */
 let advplsPath: string | undefined;
 
+/** Inicialização em andamento: chamadas simultâneas aguardam o mesmo advpls. */
+let starting: Promise<{ client: AdvplsClient; session: SessionManager }> | undefined;
+
 /** Inicializa o advpls sob demanda (primeira tool que precisar). */
 async function ensureClient(): Promise<{ client: AdvplsClient; session: SessionManager }> {
   if (client && client.alive && session) return { client, session };
-  advplsPath = resolveAdvplsPath(config.advplsPath);
-  client = await AdvplsClient.start(advplsPath);
-  session = new SessionManager(client, config);
-  return { client, session };
+  starting ??= (async () => {
+    advplsPath = resolveAdvplsPath(config.advplsPath);
+    const c = await AdvplsClient.start(advplsPath);
+    client = c;
+    session = new SessionManager(c, config);
+    return { client: c, session };
+  })().finally(() => {
+    starting = undefined;
+  });
+  return starting;
 }
 
 /** Binário em uso, ou o que seria usado se o advpls ainda não subiu. */
@@ -86,8 +95,9 @@ function advplsDiagnostic(): (AdvplsBinaryInfo & { emExecucao: boolean }) | { er
   }
 }
 
+/** URI de arquivo com caminho absoluto: relativo é resolvido pela pasta atual do MCP. */
 function toFileUri(p: string): string {
-  return URI.file(p).toString();
+  return URI.file(path.resolve(p)).toString();
 }
 
 function isAdvplSource(file: string): boolean {
@@ -99,9 +109,8 @@ function isAdvplResource(file: string): boolean {
 }
 
 /**
- * Expande caminhos: arquivos informados diretamente + varredura recursiva de
- * pastas. Na varredura entram fontes E recursos (antes os recursos eram
- * descartados em silêncio).
+ * Expande caminhos para absolutos: arquivos informados diretamente + varredura
+ * recursiva de pastas. Na varredura entram fontes e recursos.
  */
 function expandFiles(inputs: string[]): string[] {
   const result: string[] = [];
@@ -110,14 +119,16 @@ function expandFiles(inputs: string[]): string[] {
     if (!stat) throw new Error(`Arquivo/pasta não encontrado: ${input}`);
     if (stat.isDirectory()) {
       for (const entry of fs.readdirSync(input, { recursive: true, encoding: "utf-8" })) {
-        // Pastas ocultas não são fonte: .vscode/.advpl guarda cache gerado pelo TDS.
-        if (entry.split(/[\\/]/).some((part) => part.startsWith("."))) continue;
-        const full = path.join(input, entry);
+        // Pastas ocultas não são fonte (.vscode/.advpl guarda cache gerado pelo
+        // TDS), e node_modules de frontend traria .js de bibliotecas como recurso.
+        const parts = entry.split(/[\\/]/);
+        if (parts.some((part) => part.startsWith(".") || part.toLowerCase() === "node_modules")) continue;
+        const full = path.resolve(input, entry);
         if (!fs.statSync(full).isFile()) continue;
         if (isAdvplSource(full) || isAdvplResource(full)) result.push(full);
       }
     } else {
-      result.push(input);
+      result.push(path.resolve(input));
     }
   }
   return result;
@@ -167,8 +178,24 @@ function defaultCompileOptions(): CompileOptions {
   };
 }
 
+const ACEITAR_MISTO_SCHEMA = z
+  .boolean()
+  .optional()
+  .default(false)
+  .describe(
+    "Libera fonte CP1252 com linhas que parecem UTF-8 (`misto`). Use só depois de mostrar as linhas " +
+      "apontadas ao usuário e ele confirmar que a sequência é intencional (ex.: tabela de conversão de UTF-8)."
+  );
+
+/** Fontes "misto" liberados por aceitarMisto, com as linhas, para o retorno da tool. */
+function mistoAceitoResumo(checagem: EncodingCheck[]): { arquivo: string; linhas: number[] }[] {
+  return checagem
+    .filter((c) => c.kind === "misto" && c.safe)
+    .map((c) => ({ arquivo: c.file, linhas: c.linhasUtf8 ?? [] }));
+}
+
 /** Monta o request de compilação com sessão/includes/autorização atuais. */
-async function runCompilation(files: string[], options: CompileOptions) {
+async function runCompilation(files: string[], options: CompileOptions, aceitarMisto = false) {
   const { client, session } = await ensureClient();
   const active = session.required();
   const cfg = readServersJson();
@@ -182,12 +209,14 @@ async function runCompilation(files: string[], options: CompileOptions) {
 
   // O compilador Protheus só aceita CP1252. Bloqueia ANTES de enviar para não
   // gravar fonte corrompido no RPO (ver src/encoding.ts).
-  const problemas = checkFiles(expanded).filter((c) => !c.safe);
+  const checagem = checkFiles(expanded, aceitarMisto);
+  const problemas = checagem.filter((c) => !c.safe);
   if (problemas.length > 0) throw new Error(encodingErrorMessage(problemas));
+  const mistoAceito = mistoAceitoResumo(checagem);
 
   // Marca o ponto do log: o advpls reporta falhas de build (ex.: a dica de
   // BuildKillUsers no COMPILEERROR-300) por notificação, não na resposta.
-  const logMark = client.serverLog.length;
+  const logMark = client.logCount;
 
   const result = await client.compile({
     connectionToken: active.connectionToken,
@@ -201,9 +230,9 @@ async function runCompilation(files: string[], options: CompileOptions) {
 
   // O veredito considera returnCode (falha de build) E status por fonte.
   // Ver src/verdict.ts — falha de build pode vir com compileInfos vazio.
-  const verdict = compileVerdict(result);
-  const logDaOperacao = client.serverLog.slice(logMark);
-  return { active, expanded, result, verdict, logDaOperacao };
+  const verdict = compileVerdict(result, expanded.filter(isAdvplSource));
+  const logDaOperacao = client.logSince(logMark);
+  return { active, expanded, result, verdict, logDaOperacao, mistoAceito };
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +325,9 @@ server.registerTool(
       "combina as duas formas de falha. (a) falha de BUILD: `returnCode` != 0, com `falhaDeBuild` " +
       "explicando; nesse caso o build é revertido e NADA é gravado no RPO, mesmo que a lista " +
       "`resultados` venha vazia ou só com SUCCESS (ex.: COMPILEERROR-300 = sem acesso exclusivo ao " +
-      "RPO). (b) falha de FONTE: itens com status ERROR/FATAL em `resultados`. Nunca conclua " +
+      "RPO). (b) falha de FONTE: itens com status ERROR/FATAL em `resultados`. (c) resposta " +
+      "INCONCLUSIVA: vazia, status desconhecido ou fonte sem resultado, explicada em " +
+      "`inconclusivo`; não afirme que compilou. Nunca conclua " +
       "sucesso apenas por não haver erros em `resultados`. Em falha, `logDoServidor` traz as " +
       "mensagens do AppServer. ATENÇÃO ao status SKIPPED: o fonte foi ignorado por já estar " +
       "atualizado no RPO — é sucesso, mas NADA foi gravado; confira `ignorados` e o campo " +
@@ -306,19 +337,26 @@ server.registerTool(
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
+      aceitarMisto: ACEITAR_MISTO_SCHEMA,
     },
   },
-  safe(async ({ arquivos, recompile }) => {
+  safe(async ({ arquivos, recompile, aceitarMisto }) => {
     const options = defaultCompileOptions();
     options.recompile = recompile ?? false;
-    const { active, expanded, verdict, logDaOperacao } = await runCompilation(arquivos, options);
+    const { active, expanded, verdict, logDaOperacao, mistoAceito } = await runCompilation(
+      arquivos,
+      options,
+      aceitarMisto ?? false
+    );
     const payload = {
       servidor: active.def.name,
       ambiente: active.environment,
+      ...(mistoAceito.length ? { encodingMistoAceito: mistoAceito } : {}),
       totalFontes: expanded.length,
       sucesso: verdict.sucesso,
       returnCode: verdict.returnCode,
       ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+      ...(verdict.inconclusivo ? { inconclusivo: verdict.inconclusivo } : {}),
       ...(verdict.aviso ? { aviso: verdict.aviso } : {}),
       ...(verdict.causaProvavel ? { causaProvavel: verdict.causaProvavel } : {}),
       erros: verdict.erros.length,
@@ -350,18 +388,31 @@ server.registerTool(
       "desenvolvimento. Erro que só aparece na execução (variável inexistente) não é detectado aqui.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
+      aceitarMisto: ACEITAR_MISTO_SCHEMA,
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ arquivos }) => {
+  safe(async ({ arquivos, aceitarMisto }) => {
     const cfg = readServersJson();
     const active = session?.current;
-    const includes = active ? effectiveIncludes(cfg, active.def) : (cfg.includes ?? []).filter((i) => !!i);
-    if (includes.length === 0) throw new Error("Nenhuma pasta de includes configurada (servers.json).");
+    const configured = active ? effectiveIncludes(cfg, active.def) : (cfg.includes ?? []).filter((i) => !!i);
+    if (configured.length === 0) throw new Error("Nenhuma pasta de includes configurada (servers.json).");
+    // Sem a pasta de include o linter não acha nem o PRTOPDEF.CH implícito e
+    // acusa C2090 na linha 1 em todo fonte.
+    const includes = configured.filter((d) => fs.statSync(d, { throwIfNoEntry: false })?.isDirectory());
+    const includesAusentes = configured.filter((d) => !includes.includes(d));
+    if (includes.length === 0) {
+      throw new Error(
+        `Nenhuma pasta de includes do servers.json existe nesta máquina: ${configured.join(", ")}. ` +
+          `Corrija as pastas de include do servidor no TDS.`
+      );
+    }
     const expanded = expandFiles(arquivos).filter(isAdvplSource);
     if (expanded.length === 0) throw new Error("Nenhum fonte AdvPL/TLPP para verificar.");
-    const problemas = checkFiles(expanded).filter((c) => !c.safe);
+    const checagem = checkFiles(expanded, aceitarMisto ?? false);
+    const problemas = checagem.filter((c) => !c.safe);
     if (problemas.length > 0) throw new Error(encodingErrorMessage(problemas));
+    const mistoAceito = mistoAceitoResumo(checagem);
 
     const { diagnosticos, semResposta } = await lintFiles(
       advplsPath ?? resolveAdvplsPath(config.advplsPath),
@@ -372,6 +423,8 @@ server.registerTool(
     const sintaxeOk = semResposta.length > 0 ? null : erros.length === 0;
     const payload = {
       ...(active ? { includesDoServidor: active.def.name } : { includes: "globais do servers.json" }),
+      ...(includesAusentes.length ? { includesAusentes } : {}),
+      ...(mistoAceito.length ? { encodingMistoAceito: mistoAceito } : {}),
       totalFontes: expanded.length,
       sintaxeOk,
       erros: erros.length,
@@ -394,20 +447,22 @@ server.registerTool(
       "Útil para depurar problemas de defines e includes.",
     inputSchema: {
       arquivo: z.string().describe("Caminho do fonte"),
+      aceitarMisto: ACEITAR_MISTO_SCHEMA,
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ arquivo }) => {
+  safe(async ({ arquivo, aceitarMisto }) => {
     const options = defaultCompileOptions();
     options.recompile = true;
     options.returnPpo = true;
-    const { verdict } = await runCompilation([arquivo], options);
+    const { verdict } = await runCompilation([arquivo], options, aceitarMisto ?? false);
     const ppo = verdict.infos.find((i) => i.status === "APPRE");
     if (!ppo) {
       return jsonFailure({
         sucesso: false,
         returnCode: verdict.returnCode,
         ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
+        ...(verdict.inconclusivo ? { inconclusivo: verdict.inconclusivo } : {}),
         mensagem: "PPO não retornado; veja resultados",
         resultados: verdict.infos.map((i) => ({
           status: i.status,
@@ -434,7 +489,7 @@ server.registerTool(
     inputSchema: {
       filtro: z.string().optional().describe("Substring case-insensitive do nome"),
       incluirRecursos: z.boolean().optional().default(false).describe("Incluir recursos não-fonte (tres)"),
-      limite: z.number().optional().default(100).describe("Máximo de itens retornados"),
+      limite: z.number().int().min(1).optional().default(100).describe("Máximo de itens retornados"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -472,7 +527,7 @@ server.registerTool(
     inputSchema: {
       filtro: z.string().optional().describe("Substring case-insensitive do nome da função"),
       apenasPublicas: z.boolean().optional().default(true).describe("Omitir funções privadas/estáticas"),
-      limite: z.number().optional().default(100).describe("Máximo de itens retornados"),
+      limite: z.number().int().min(1).optional().default(100).describe("Máximo de itens retornados"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -509,7 +564,7 @@ server.registerTool(
       "Versão do RPO, data de geração e histórico de patches aplicados no ambiente conectado. " +
       "Auditoria pré/pós-deploy.",
     inputSchema: {
-      ultimosPatches: z.number().optional().default(10).describe("Quantos patches do histórico retornar"),
+      ultimosPatches: z.number().int().min(1).optional().default(10).describe("Quantos patches do histórico retornar"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -868,6 +923,7 @@ server.registerTool(
       advpls: advplsDiagnostic(),
       log: client?.serverLog ?? [],
       configFile: configFilePath(),
+      ...(configWarnings.length ? { avisosConfig: configWarnings } : {}),
     });
   })
 );
@@ -994,7 +1050,7 @@ server.registerTool(
       usuario: z.string().optional().describe("Filtro pelo nome do usuário"),
       ambiente: z.string().optional().describe("Filtro pelo ambiente"),
       programa: z.string().optional().describe("Filtro pelo programa (ex.: SIGAFAT, HTTP_START)"),
-      limite: z.number().optional().default(100).describe("Máximo de sessões retornadas"),
+      limite: z.number().int().min(1).optional().default(100).describe("Máximo de sessões retornadas"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -1442,7 +1498,8 @@ function slugify_safe(input: string): string {
 /** Se o patch está dentro da árvore organizada, retorna a pasta do ticket. */
 function dirIfManaged(patchFile: string): string | undefined {
   const dir = path.dirname(path.resolve(patchFile));
-  return dir.toLowerCase().startsWith(config.patchesRoot.toLowerCase()) ? dir : undefined;
+  const rel = path.relative(path.resolve(config.patchesRoot), dir);
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? dir : undefined;
 }
 
 /** Fallback: .ptm mais recente da pasta criado após o início da geração. */
@@ -1467,18 +1524,28 @@ async function main() {
   await server.connect(transport);
 }
 
-process.on("SIGINT", () => {
-  void debugManager.stop();
-  client?.dispose();
-  process.exit(0);
-});
-// Cliente MCP fechou o stdio: encerra a depuração para não deixar thread presa.
-process.stdin.on("close", () => {
+/**
+ * Encerra a depuração antes de sair, para não deixar thread presa no AppServer
+ * nem debugAdapter/Chromium órfãos. Vale para Ctrl+C e para o cliente MCP
+ * fechando o stdio.
+ */
+let shuttingDown = false;
+function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
   void debugManager.stop().finally(() => {
     client?.dispose();
     process.exit(0);
   });
+}
+// Uma promise rejeitada sem tratamento (escrita num processo filho que acabou
+// de morrer, por exemplo) encerraria o MCP inteiro: registra no stderr e segue.
+process.on("unhandledRejection", (reason) => {
+  console.error("tds-mcp: rejeição sem tratamento:", reason instanceof Error ? reason.stack : reason);
 });
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+process.stdin.on("close", shutdown);
 
 main().catch((err) => {
   console.error("Falha ao iniciar tds-mcp:", err);

@@ -10,14 +10,22 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isFile } from "./advpls.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Chromium: config > TDS_MCP_CHROMIUM > Chromium do usuário > Chrome > Edge. */
 export function resolveChromiumPath(configured?: string): string {
+  // Navegador escolhido explicitamente e ausente é erro, não motivo para usar outro.
+  for (const [origem, escolhido] of [
+    ["chromiumPath do config do tds-mcp", configured],
+    ["TDS_MCP_CHROMIUM", process.env.TDS_MCP_CHROMIUM],
+  ] as const) {
+    if (!escolhido) continue;
+    if (isFile(escolhido)) return escolhido;
+    throw new Error(`${origem} não existe ou não é arquivo: ${escolhido}`);
+  }
   const candidates = [
-    configured,
-    process.env.TDS_MCP_CHROMIUM,
     path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "Chromium", "Application", "chrome.exe"),
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
@@ -89,14 +97,29 @@ export class HeadlessWebapp {
   private id = 0;
   private pending = new Map<number, (msg: any) => void>();
 
-  private constructor(proc: ChildProcess) {
+  private constructor(proc: ChildProcess, profileDir: string) {
     this.proc = proc;
+    // Perfil descartável: removido quando o navegador sai (antes disso o
+    // Windows mantém os arquivos bloqueados).
+    proc.on("exit", () => {
+      try {
+        fs.rmSync(profileDir, { recursive: true, force: true });
+      } catch {
+        /* ainda bloqueado; a varredura do próximo start remove */
+      }
+    });
   }
 
-  static async open(chromiumPath: string, url: string, profileDir: string): Promise<HeadlessWebapp> {
-    fs.mkdirSync(profileDir, { recursive: true });
+  /**
+   * Abre o webapp num Chromium headless com perfil próprio em `baseDir`.
+   * Dois Chromium no mesmo perfil não convivem (o segundo sai com código 21
+   * sem abrir o CDP), então cada execução usa uma pasta nova: execuções
+   * simultâneas em sessões diferentes do tds-mcp não se bloqueiam.
+   */
+  static async open(chromiumPath: string, url: string, baseDir: string): Promise<HeadlessWebapp> {
+    fs.mkdirSync(baseDir, { recursive: true });
+    const profileDir = fs.mkdtempSync(path.join(baseDir, "chromium-profile-"));
     const portFile = path.join(profileDir, "DevToolsActivePort");
-    fs.rmSync(portFile, { force: true });
     const proc = spawn(
       chromiumPath,
       [
@@ -110,39 +133,52 @@ export class HeadlessWebapp {
       ],
       { stdio: "ignore", windowsHide: true }
     );
-    const page = new HeadlessWebapp(proc);
-    let port = 0;
-    for (let i = 0; i < 100 && !port; i++) {
-      try {
-        port = Number(fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0]);
-      } catch {
-        await sleep(100);
+    const page = new HeadlessWebapp(proc, profileDir);
+    let spawnError: Error | undefined;
+    proc.on("error", (err) => (spawnError = err));
+    try {
+      let port = 0;
+      for (let i = 0; i < 100 && !port && !spawnError && proc.exitCode === null; i++) {
+        try {
+          port = Number(fs.readFileSync(portFile, "utf8").split(/\r?\n/)[0]);
+        } catch {
+          await sleep(100);
+        }
       }
-    }
-    if (!port) {
-      page.close();
-      throw new Error("O navegador headless não abriu a porta de depuração (CDP).");
-    }
-    const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as any[];
-    const target = targets.find((t) => t.type === "page");
-    if (!target) {
-      page.close();
-      throw new Error("O navegador headless não abriu a página do webapp.");
-    }
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("Falha ao conectar no CDP do navegador headless."));
-    });
-    ws.onmessage = (m) => {
-      const msg = JSON.parse(String(m.data));
-      if (msg.id && page.pending.has(msg.id)) {
-        page.pending.get(msg.id)!(msg);
-        page.pending.delete(msg.id);
+      if (!port) {
+        const motivo = spawnError
+          ? `: ${spawnError.message}`
+          : proc.exitCode !== null
+            ? ` (o navegador saiu com código ${proc.exitCode})`
+            : "";
+        throw new Error(`O navegador headless não abriu a porta de depuração (CDP)${motivo}.`);
       }
-    };
-    page.ws = ws;
-    return page;
+      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as any[];
+      const target = targets.find((t) => t.type === "page");
+      if (!target) throw new Error("O navegador headless não abriu a página do webapp.");
+      const ws = new WebSocket(target.webSocketDebuggerUrl);
+      page.ws = ws;
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("Falha ao conectar no CDP do navegador headless."));
+      });
+      ws.onmessage = (m) => {
+        let msg: any;
+        try {
+          msg = JSON.parse(String(m.data));
+        } catch {
+          return;
+        }
+        if (msg.id && page.pending.has(msg.id)) {
+          page.pending.get(msg.id)!(msg);
+          page.pending.delete(msg.id);
+        }
+      };
+      return page;
+    } catch (err) {
+      await page.close();
+      throw err;
+    }
   }
 
   private send(method: string, params: unknown = {}): Promise<any> {
@@ -203,7 +239,8 @@ export class HeadlessWebapp {
     return { resumo, detalhes };
   }
 
-  close(): void {
+  /** Encerra o navegador sem esperar (saída do processo do MCP). */
+  kill(): void {
     try {
       this.ws?.close();
     } catch {
@@ -215,4 +252,24 @@ export class HeadlessWebapp {
       /* já encerrado */
     }
   }
+
+  /** Encerra o navegador e espera ele sair (até 3 s), quando o perfil é apagado. */
+  close(): Promise<void> {
+    this.kill();
+    return waitExit(this.proc, 3000);
+  }
+}
+
+/** Resolve quando o processo sai, falha ao iniciar (sem pid) ou o prazo acaba. */
+export function waitExit(proc: ChildProcess, timeoutMs: number): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null || proc.pid === undefined) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    proc.once("exit", done);
+    proc.once("error", done);
+  });
 }

@@ -17,7 +17,11 @@ const client = await AdvplsClient.start(resolveAdvplsPath(config.advplsPath));
 const session = new SessionManager(client, config);
 
 try {
-  const active = await session.useServer(serverName, environment);
+  // Credenciais opcionais, como nos E2E (sem elas vale o token salvo pelo TDS ou o config)
+  const explicit = process.env.TDS_MCP_TEST_USER
+    ? { user: process.env.TDS_MCP_TEST_USER, password: process.env.TDS_MCP_TEST_PASSWORD ?? "" }
+    : undefined;
+  const active = await session.useServer(serverName, environment, explicit);
   const cfg = readServersJson();
   const result = await client.request("$totvsserver/deletePrograms", {
     deleteProgramsInfo: {
