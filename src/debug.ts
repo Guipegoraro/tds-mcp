@@ -373,6 +373,8 @@ export class DebugSession {
 export class DebugManager {
   current?: DebugSession;
   private idleTimer?: NodeJS.Timeout;
+  /** Vaga reservada por um start em andamento. */
+  private starting?: { programa: string; servidor: string; desde: Date };
 
   constructor(private idleMinutes: number) {
     const cleanup = () => {
@@ -387,13 +389,35 @@ export class DebugManager {
     return this.current;
   }
 
+  /**
+   * Uma sessão por vez. A vaga é reservada antes de qualquer await: duas
+   * chamadas simultâneas (tds_run, tds_debug_start) não podem ambas passar na
+   * conferência e deixar um debugAdapter órfão.
+   */
   async start(opts: StartOptions): Promise<{ session: DebugSession; breakpoints: Record<string, unknown> }> {
-    if (this.current && !this.current.encerrada) {
+    const ocupada =
+      this.starting ??
+      (this.current && !this.current.encerrada
+        ? { programa: this.current.programa, servidor: this.current.servidor, desde: this.current.iniciadaEm }
+        : undefined);
+    if (ocupada) {
+      const hora = ocupada.desde.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       throw new Error(
-        `Já existe uma sessão de depuração ativa (${this.current.programa} em ${this.current.servidor}). ` +
-          `Encerre com tds_debug_stop antes de iniciar outra.`
+        `Depurador ocupado: ${ocupada.programa} em ${ocupada.servidor} desde ${hora}. ` +
+          `Encerre com tds_debug_stop ou aguarde a execução terminar.`
       );
     }
+    this.starting = { programa: opts.programa, servidor: opts.active.def.name, desde: new Date() };
+    try {
+      return await this.launchSession(opts);
+    } finally {
+      this.starting = undefined;
+    }
+  }
+
+  private async launchSession(
+    opts: StartOptions
+  ): Promise<{ session: DebugSession; breakpoints: Record<string, unknown> }> {
     if (this.current) await this.stop();
     const logDir = path.join(os.tmpdir(), "tds-mcp");
     fs.mkdirSync(logDir, { recursive: true });

@@ -155,6 +155,21 @@ try {
   check("debug_wait sem navegador aberto: continua executando", wait.data?.estado === "executando", short(wait.data));
   await call("tds_debug_stop");
 
+  // --- concorrência: duas execuções ao mesmo tempo -> uma roda, a outra recebe "ocupado"
+  const [r1, r2] = await Promise.all([
+    call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),
+    call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),
+  ]);
+  const resultados = [r1, r2];
+  check(
+    "concorrência: uma execução conclui e a outra recebe erro de ocupado",
+    resultados.filter((r) => r.data?.resultado === "concluido").length === 1 &&
+      resultados.filter((r) => r.isError && /Depurador ocupado/.test(r.data?.erro ?? "")).length === 1,
+    short(resultados.map((r) => r.data?.resultado ?? r.data?.erro))
+  );
+  const r3 = await call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 });
+  check("concorrência: depois disso a vaga fica livre", r3.data?.resultado === "concluido", short(r3.data));
+
   // --- sem threads presas no servidor
   const users = await call("tds_monitor_users", { programa: "ZTSTDBG" });
   check("nenhuma thread de teste presa no servidor", (users.data?.totalFiltrado ?? 1) === 0, short(users.data?.sessoes));
