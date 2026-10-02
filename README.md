@@ -76,10 +76,10 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 
 | Tool | Descrição | Efeito |
 |---|---|---|
-| `tds_list_servers` | Servidores do servers.json, ambientes e sessão ativa | read-only |
-| `tds_use_server` | Conecta/autentica em servidor + ambiente | sessão |
+| `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
+| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados) | sessão |
 | `tds_compile` | Compila fontes/pastas no RPO | **grava no RPO** |
-| `tds_syntax_check` | Valida sintaxe sem commitar no RPO | nenhum |
+| `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
 | `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`) | nenhum |
 | `tds_rpo_objects` | Lista objetos do RPO (filtro + datas) | read-only |
 | `tds_rpo_functions` | Lista funções do RPO (fonte + linha) | read-only |
@@ -88,12 +88,27 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_patch_validate` | Valida patch contra o RPO sem aplicar | read-only |
 | `tds_patch_info` | Lista o conteúdo de um `.ptm` | read-only |
 | `tds_patch_apply` | **Aplica** patch no RPO (deploy) | **destrutivo** |
-| `tds_server_log` | Últimas mensagens do advpls (diagnóstico) | read-only |
+| `tds_server_log` | Últimas mensagens do advpls + caminho e versões do tds-ls/extensão | read-only |
+| `tds_server_files` | Pastas e arquivos de uma pasta do AppServer | read-only |
+| `tds_server_permissions` | Operações que o usuário pode executar no AppServer | read-only |
+| `tds_monitor_users` | Sessões (threads) conectadas: usuário, ambiente, programa, memória | read-only |
+| `tds_monitor_send_message` | Envia mensagem ao usuário de uma sessão | **afeta usuário** |
+| `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre | **destrutivo** |
+| `tds_monitor_kill_user` | Derruba a sessão imediatamente | **destrutivo** |
+| `tds_run` | Executa uma função num SmartClient HTML invisível: concluído, erro (fonte/linha + pilha com variáveis) ou tempo esgotado (texto da tela) | **executa código** |
+| `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST) | **executa código** |
+| `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
+| `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
+| `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela | read-only |
+| `tds_debug_evaluate` | Avalia expressão no ponto de parada; `x := v` altera o programa | **executa código** |
+| `tds_debug_watch` / `tds_debug_stop` | Expressões observadas a cada parada / encerra a sessão e libera a thread | depuração |
 
 ### Segurança operacional (leia antes de usar em cliente)
 
-`tds_compile`, `tds_patch_generate` e `tds_patch_apply` **alteram o RPO de um servidor real**.
-Recomendação forte: configure seu cliente MCP para **sempre pedir confirmação** nessas três.
+`tds_compile`, `tds_patch_generate` e `tds_patch_apply` **alteram o RPO de um servidor real**, e as
+tools de ação do monitor (`tds_monitor_*`) **afetam usuários conectados**, e
+`tds_run`, `tds_debug_start` e `tds_debug_evaluate` **executam código no servidor**.
+Recomendação forte: configure seu cliente MCP para **sempre pedir confirmação** nelas.
 No Claude Code, em `~/.claude/settings.json`:
 
 ```json
@@ -102,13 +117,41 @@ No Claude Code, em `~/.claude/settings.json`:
     "ask": [
       "mcp__tds__tds_compile",
       "mcp__tds__tds_patch_generate",
-      "mcp__tds__tds_patch_apply"
+      "mcp__tds__tds_patch_apply",
+      "mcp__tds__tds_monitor_send_message",
+      "mcp__tds__tds_monitor_kill_user",
+      "mcp__tds__tds_monitor_app_kill_user",
+      "mcp__tds__tds_run",
+      "mcp__tds__tds_debug_start",
+      "mcp__tds__tds_debug_evaluate"
     ]
   }
 }
 ```
 
+As ações do monitor identificam a sessão pela thread e conferem na lista atual do monitor antes
+de agir.
+Uma thread parada num breakpoint fica presa no AppServer até o depurador sair: `tds_debug_stop`
+libera, e a sessão também encerra sozinha por inatividade (`debugIdleMinutes`) e quando o tds-mcp fecha.
 As demais tools são read-only e podem ser liberadas sem risco.
+
+## Execução e depuração
+
+Usa o debugAdapter da TOTVS (`@totvs/tds-da`, o mesmo do VS Code, localizado ao lado do advpls) e
+o SmartClient HTML (webapp) do AppServer, num Chromium/Chrome/Edge headless controlado pelo
+tds-mcp. O processo para o agente (pedir licença, alinhar fonte e RPO, escolher o modo,
+inspecionar, encerrar) está na skill [`skills/debugar-advpl`](skills/debugar-advpl/SKILL.md) deste repositório.
+Para o Claude Code enxergá-la, ligue a pasta nas skills do usuário (Windows, sem admin):
+
+```bat
+mklink /J "%USERPROFILE%\.claude\skills\debugar-advpl" "<repo>\skills\debugar-advpl"
+```
+
+Limitações do depurador TOTVS que as tools contornam: `evaluate` só no frame do topo (outros
+frames via `tds_debug_variables`), sem `setVariable` (use `x := v`), pause não interrompe thread
+em `Sleep` (inclua breakpoint), logpoint só interpola nome de variável numérica (use `rastro`),
+erro de execução não para o depurador (a tela de erro é capturada e devolvida).
+
 
 ## Como ler o resultado de uma compilação
 
@@ -199,15 +242,23 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
   "advplsPath": "",
   "credentials": {
     "NomeDoServidorNoTDS": { "user": "usuario", "password": "senha" }
-  }
+  },
+  "webappUrls": { "NomeDoServidorNoTDS": "http://servidor:8080/webapp/" },
+  "debugIdleMinutes": 10
 }
 ```
 
 - `patchesRoot` — raiz da árvore de patches (padrão `C:\TOTVS\patches`)
-- `advplsPath` — só se o advpls não estiver na extensão instalada. Também aceita a variável
+- `advplsPath` — só se o advpls não estiver na extensão instalada (sem ele, usa a extensão
+  tds-vscode de maior versão; `tds_server_log` mostra qual binário está em uso). Também aceita a variável
   de ambiente `TDS_MCP_ADVPLS`
 - `credentials` — **senhas em texto plano**. Prefira deixar vazio e usar o token do TDS.
   O arquivo fica fora do repositório; nunca o versione.
+- `webappUrls` — URL do webapp por servidor, quando não for `http(s)://<endereço>:<porta>/webapp/`
+  (porta multiprotocolo)
+- `debugIdleMinutes` — minutos sem uso até a sessão de depuração encerrar (padrão 10)
+- `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
+  encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`)
 
 ## Desenvolvimento e testes
 
@@ -219,15 +270,27 @@ node test/smoke.mjs <servidor> [ambiente]      # read-only: conecta e inspeciona
 node test/debug-protocol.mjs [host] [porta]    # JSON-RPC cru (diagnóstico de protocolo)
 node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada cenário
 node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MCP
+node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
+node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO
 ```
 
+Os E2E aceitam `TDS_MCP_TEST_USER` e `TDS_MCP_TEST_PASSWORD` para autenticar com usuário e senha
+quando o token salvo pelo TDS expirou.
+
 O E2E compila `test/zTstMcp1.prw` (User Function inofensiva) e gera um patch. **Use apenas
 em ambiente de desenvolvimento descartável** e rode o cleanup depois.
 
 ## Limitações
+
+- **Verificação de sintaxe**: no tds-ls 2.2.x o modo `syntaxOnly` da compilação deixou de passar
+  pelo AppServer (vira o linter local, que só reporta para arquivo aberto num workspace LSP). Por
+  isso `tds_syntax_check` sobe um language server próprio, abre os fontes e colhe os diagnósticos
+  do linter, com as pastas de include do servidor. O linter é mais rigoroso que o compilador em
+  alguns casos (ex.: `For` com variável não Local vira aviso W0004 na compilação; o tds-mcp
+  rebaixa esse caso); na dúvida, compile num ambiente de desenvolvimento.
 
 - **Windows apenas** por enquanto: a resolução do binário procura
   `bin/windows/advpls.exe` na extensão tds-vscode. O `advpls` existe para Linux e macOS

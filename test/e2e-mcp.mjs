@@ -13,6 +13,10 @@ import { fileURLToPath } from "node:url";
 
 const serverName = process.argv[2] ?? process.env.TDS_MCP_TEST_SERVER;
 const environment = process.argv[3] ?? process.env.TDS_MCP_TEST_ENV;
+// Credenciais opcionais (sem elas vale o token salvo pelo TDS ou o config do tds-mcp)
+const credenciais = process.env.TDS_MCP_TEST_USER
+  ? { usuario: process.env.TDS_MCP_TEST_USER, senha: process.env.TDS_MCP_TEST_PASSWORD ?? "" }
+  : {};
 
 if (!serverName) {
   console.error("Informe o servidor: node test/e2e-mcp.mjs <servidor> [ambiente]");
@@ -49,7 +53,7 @@ async function call(name, args = {}) {
 const tools = await mcp.listTools();
 console.log("tools:", tools.tools.map((t) => t.name).join(", "));
 
-await call("tds_use_server", { servidor: serverName, ambiente: environment });
+await call("tds_use_server", { servidor: serverName, ambiente: environment, ...credenciais });
 await call("tds_syntax_check", { arquivos: [testSource] });
 await call("tds_compile", { arquivos: [testSource], recompile: true });
 await call("tds_rpo_objects", { filtro: "ZTSTMCP" });

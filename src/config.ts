@@ -21,6 +21,17 @@ export interface TdsMcpConfig {
   advplsPath?: string;
   /** Credenciais por NOME de servidor (como aparece no servers.json) */
   credentials: Record<string, ServerCredentials>;
+  /** Caminho explícito do debugAdapter.exe (opcional; padrão: ao lado do advpls) */
+  debugAdapterPath?: string;
+  /** Navegador para o webapp (opcional; padrão: Chromium, Chrome ou Edge instalados) */
+  chromiumPath?: string;
+  /**
+   * URL do webapp por NOME de servidor, quando não for a padrão
+   * http(s)://<endereço>:<porta>/webapp/ (porta multiprotocolo).
+   */
+  webappUrls?: Record<string, string>;
+  /** Minutos sem uso até uma sessão de depuração ser encerrada (padrão 10). */
+  debugIdleMinutes?: number;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".tds-mcp");

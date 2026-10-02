@@ -6,8 +6,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { AdvplsClient } from "./advpls.js";
-import type { TdsMcpConfig } from "./config.js";
+import { AdvplsClient, CONN_TYPE } from "./advpls.js";
+import type { TdsMcpConfig, ServerCredentials } from "./config.js";
 
 export interface TdsServerDef {
   id: string;
@@ -40,6 +40,8 @@ export interface ActiveSession {
   connectionToken: string;
   user: string;
   authMethod: "none" | "saved-token" | "credentials";
+  /** Conexão de monitor aberta sob demanda (ver SessionManager.monitorToken). */
+  monitorToken?: string;
 }
 
 /**
@@ -127,9 +129,14 @@ export class SessionManager {
 
   /**
    * Conecta e autentica em um servidor/ambiente.
-   * Ordem de autenticação: token salvo do TDS -> credenciais do config do MCP.
+   * Ordem de autenticação: credenciais informadas na chamada (só para esta
+   * sessão; não são gravadas) -> token salvo do TDS -> credenciais do config.
    */
-  async useServer(nameOrId: string, environment?: string): Promise<ActiveSession> {
+  async useServer(
+    nameOrId: string,
+    environment?: string,
+    explicit?: ServerCredentials
+  ): Promise<ActiveSession> {
     const cfg = readServersJson();
     const def = findServer(cfg, nameOrId);
     if (!def) {
@@ -145,12 +152,17 @@ export class SessionManager {
       );
     }
 
-    // Encerra sessão anterior, se houver
+    // Encerra sessão anterior (e a conexão de monitor dela), se houver
     if (this.current) {
-      try {
-        await this.client.disconnect(this.current.def.name, this.current.connectionToken);
-      } catch {
-        /* melhor esforço */
+      const previous = this.current;
+      const tokens: [string, string][] = [[previous.def.name, previous.connectionToken]];
+      if (previous.monitorToken) tokens.push([`${previous.def.name}_monitor`, previous.monitorToken]);
+      for (const [name, token] of tokens) {
+        try {
+          await this.client.disconnect(name, token);
+        } catch {
+          /* melhor esforço */
+        }
       }
       this.current = undefined;
     }
@@ -195,7 +207,7 @@ export class SessionManager {
     }
 
     // 1) Token de reconexão salvo pelo TDS (zero-config quando o VS Code já conectou antes)
-    const saved = savedTokenFor(cfg, def, env);
+    const saved = explicit ? undefined : savedTokenFor(cfg, def, env);
     if (saved) {
       try {
         const rec = await this.client.reconnect(def.name, saved);
@@ -214,8 +226,8 @@ export class SessionManager {
       }
     }
 
-    // 2) Credenciais do config do MCP
-    const creds = this.config.credentials[def.name];
+    // 2) Credenciais informadas na chamada, senão as do config do MCP
+    const creds = explicit ?? this.config.credentials[def.name];
     if (creds) {
       // A tentativa de reconnect frustrada pode invalidar o token da conexão
       // original; abre uma conexão nova antes de autenticar.
@@ -266,5 +278,29 @@ export class SessionManager {
       );
     }
     return this.current;
+  }
+
+  /**
+   * Token da conexão de monitor do servidor ativo. As requests $totvsmonitor/*
+   * só valem numa conexão do tipo MONITOR; ela nasce de um
+   * reconnect com o token da sessão ativa e o nome "<servidor>_monitor",
+   * como faz o monitor do tds-vscode.
+   */
+  async monitorToken(): Promise<string> {
+    const active = this.required();
+    if (active.monitorToken) return active.monitorToken;
+    const rec = await this.client.reconnect(
+      `${active.def.name}_monitor`,
+      active.connectionToken,
+      CONN_TYPE.MONITOR
+    );
+    if (!rec?.connectionToken) {
+      throw new Error(
+        `Não foi possível abrir a conexão de monitor em "${active.def.name}". ` +
+          `Confira se o usuário tem privilégio de monitor (tds_server_permissions).`
+      );
+    }
+    active.monitorToken = rec.connectionToken;
+    return active.monitorToken;
   }
 }

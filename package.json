@@ -11,14 +11,15 @@
     "dist",
     "config.example.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "skills"
   ],
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "node test/verdict.test.mjs && node test/encoding.test.mjs",
+    "test": "node test/verdict.test.mjs && node test/encoding.test.mjs && node test/advpls.test.mjs && node test/breakpointLines.test.mjs",
     "test:smoke": "node test/smoke.mjs",
     "test:e2e": "node test/e2e-mcp.mjs"
   },

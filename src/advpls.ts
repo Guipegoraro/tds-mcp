@@ -125,15 +125,58 @@ export interface RpoFunction {
   source_status: string;
 }
 
+/** Sessão (thread) do AppServer como o monitor a reporta. */
+export interface MonitorUser {
+  username: string;
+  computerName: string;
+  threadId: number;
+  server: string;
+  mainName: string;
+  environment: string;
+  loginTime: string;
+  elapsedTime: string;
+  totalInstrCount: number;
+  instrCountPerSec: number;
+  remark: string;
+  memUsed: number;
+  sid: string;
+  ctreeTaskId: number;
+  clientType: string;
+  inactiveTime: string;
+}
+
+/** Sessão-alvo das ações do monitor (mensagem, desconexão). */
+export type MonitorTarget = Pick<
+  MonitorUser,
+  "username" | "computerName" | "threadId" | "server" | "environment"
+>;
+
+export interface ServerPermissionsResult {
+  message: string;
+  serverPermissions: { operation: string[]; text: string[] };
+}
+
 export const CONN_TYPE = { DEBUGGER: 3, MONITOR: 13 } as const;
 
 // ---------------------------------------------------------------------------
 // Localização do binário
 // ---------------------------------------------------------------------------
 
+/** Compara versões "a.b.c" numericamente (2.1.10 > 2.1.9); partes ausentes valem 0. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map((p) => Number.parseInt(p, 10) || 0);
+  const pb = b.split(/[.-]/).map((p) => Number.parseInt(p, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 /**
  * Resolve o caminho do advpls: config explícita > variável de ambiente >
- * extensão tds-vscode instalada (maior versão).
+ * extensão tds-vscode instalada (maior versão, comparada numericamente — o
+ * VS Code mantém a versão anterior na pasta por um tempo após atualizar).
  */
 export function resolveAdvplsPath(configured?: string): string {
   if (configured && fs.existsSync(configured)) return configured;
@@ -143,12 +186,12 @@ export function resolveAdvplsPath(configured?: string): string {
 
   const extDir = path.join(os.homedir(), ".vscode", "extensions");
   const binRel = path.join("node_modules", "@totvs", "tds-ls", "bin", "windows", "advpls.exe");
+  const prefix = "totvs.tds-vscode-";
   if (fs.existsSync(extDir)) {
     const candidates = fs
       .readdirSync(extDir)
-      .filter((d) => d.startsWith("totvs.tds-vscode-"))
-      .sort()
-      .reverse();
+      .filter((d) => d.startsWith(prefix))
+      .sort((a, b) => compareVersions(b.slice(prefix.length), a.slice(prefix.length)));
     for (const dir of candidates) {
       const p = path.join(extDir, dir, binRel);
       if (fs.existsSync(p)) return p;
@@ -159,6 +202,39 @@ export function resolveAdvplsPath(configured?: string): string {
     "advpls.exe não encontrado. Instale a extensão totvs.tds-vscode no VS Code, " +
       "ou informe o caminho em TDS_MCP_ADVPLS / config advplsPath."
   );
+}
+
+export interface AdvplsBinaryInfo {
+  caminho: string;
+  /** Versão do pacote @totvs/tds-ls que traz o binário, quando identificável. */
+  versaoTdsLs?: string;
+  /** Versão da extensão tds-vscode que contém o binário, quando for o caso. */
+  versaoExtensao?: string;
+}
+
+/**
+ * Versões do binário em uso, lidas dos package.json vizinhos
+ * (<ext>/node_modules/@totvs/tds-ls/bin/windows/advpls.exe). Correções de
+ * conexão com releases novas do Protheus chegam por versão do tds-ls.
+ */
+export function advplsBinaryInfo(advplsPath: string): AdvplsBinaryInfo {
+  const info: AdvplsBinaryInfo = { caminho: advplsPath };
+  const readVersion = (pkg: string): string | undefined => {
+    try {
+      return JSON.parse(fs.readFileSync(pkg, "utf-8")).version;
+    } catch {
+      return undefined;
+    }
+  };
+  const tdsLsDir = path.resolve(path.dirname(advplsPath), "..", "..");
+  if (path.basename(tdsLsDir) === "tds-ls") {
+    info.versaoTdsLs = readVersion(path.join(tdsLsDir, "package.json"));
+    const extRoot = path.resolve(tdsLsDir, "..", "..", "..");
+    if (path.basename(extRoot).startsWith("totvs.tds-vscode-")) {
+      info.versaoExtensao = readVersion(path.join(extRoot, "package.json"));
+    }
+  }
+  return info;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,13 +365,13 @@ export class AdvplsClient {
     });
   }
 
-  reconnect(serverName: string, connectionToken: string): Promise<ReconnectResult> {
+  reconnect(
+    serverName: string,
+    connectionToken: string,
+    connType: number = CONN_TYPE.DEBUGGER
+  ): Promise<ReconnectResult> {
     return this.request("$totvsserver/reconnect", {
-      reconnectInfo: {
-        connectionToken,
-        serverName,
-        connType: CONN_TYPE.DEBUGGER,
-      },
+      reconnectInfo: { connectionToken, serverName, connType },
     });
   }
 
@@ -442,6 +518,80 @@ export class AdvplsClient {
           rpo_status: groups[7],
         };
       });
+  }
+
+  /** Pastas (includeDir=true) ou arquivos de uma pasta do servidor; "" = raiz. */
+  async getPatchDir(
+    connectionToken: string,
+    environment: string,
+    folder: string,
+    includeDir: boolean
+  ): Promise<string[]> {
+    const response = await this.request<{ directory?: string[] }>("$totvsserver/getPatchDir", {
+      pathDirListInfo: { connectionToken, environment, folder, includeDir },
+    });
+    return response?.directory ?? [];
+  }
+
+  serverPermissions(connectionToken: string): Promise<ServerPermissionsResult> {
+    return this.request("$totvsserver/serverPermissions", {
+      serverPermissionsInfo: { connectionToken },
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Monitor: exigem token de conexão do tipo MONITOR
+  // ------------------------------------------------------------------
+
+  async getUsers(monitorToken: string): Promise<MonitorUser[]> {
+    const response = await this.request<{ mntUsers?: MonitorUser[] }>("$totvsmonitor/getUsers", {
+      getUsersInfo: { connectionToken: monitorToken },
+    });
+    return response?.mntUsers ?? [];
+  }
+
+  /** Mensagem exibida ao usuário da sessão. Resposta do servidor em `message`. */
+  async sendUserMessage(monitorToken: string, target: MonitorTarget, message: string): Promise<string> {
+    const response = await this.request<{ message?: string }>("$totvsmonitor/sendUserMessage", {
+      sendUserMessageInfo: {
+        connectionToken: monitorToken,
+        userName: target.username,
+        computerName: target.computerName,
+        threadId: target.threadId,
+        server: target.server,
+        environment: target.environment,
+        message,
+      },
+    });
+    return response?.message ?? "";
+  }
+
+  /** Encerra a sessão imediatamente. */
+  async killUser(monitorToken: string, target: MonitorTarget): Promise<string> {
+    const response = await this.request<{ message?: string }>("$totvsmonitor/killUser", {
+      killUserInfo: {
+        connectionToken: monitorToken,
+        userName: target.username,
+        computerName: target.computerName,
+        threadId: target.threadId,
+        serverName: target.server,
+      },
+    });
+    return response?.message ?? "";
+  }
+
+  /** Pede à aplicação da sessão que se encerre (desconexão não imediata). */
+  async appKillUser(monitorToken: string, target: MonitorTarget): Promise<string> {
+    const response = await this.request<{ message?: string }>("$totvsmonitor/appKillUser", {
+      appKillUserInfo: {
+        connectionToken: monitorToken,
+        userName: target.username,
+        computerName: target.computerName,
+        threadId: target.threadId,
+        serverName: target.server,
+      },
+    });
+    return response?.message ?? "";
   }
 
   dispose(): void {
