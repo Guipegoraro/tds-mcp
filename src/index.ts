@@ -28,7 +28,15 @@ import { lintFiles } from "./linter.js";
 import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
-import { TEMPORARIOS_FILE, loadTemporarios, nomeNoRpo, registrarCompilacao, removerTemporarios, temporariosDe } from "./temporarios.js";
+import {
+  TEMPORARIOS_FILE,
+  loadTemporarios,
+  nomeNoRpo,
+  prefixoWrapper,
+  registrarCompilacao,
+  removerTemporarios,
+  temporariosDe,
+} from "./temporarios.js";
 import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding.js";
 import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
@@ -291,7 +299,9 @@ server.registerTool(
       "Conecta e autentica em um servidor/ambiente do servers.json para as demais tools. " +
       "Com usuario e senha informados, autentica com eles (valem só para esta sessão do MCP; " +
       "não são gravados). Sem eles, tenta o token de reconexão salvo pelo TDS e, se falhar, as " +
-      "credenciais de ~/.tds-mcp/config.json.",
+      "credenciais de ~/.tds-mcp/config.json. Devolve também `prefixoWrapper`: o início do nome " +
+      "de wrapper de teste desta pessoa nesta máquina (ex.: zTK3F); complete com 3 letras da " +
+      "rotina (zTK3FCal) para não colidir no RPO com o wrapper de outro desenvolvedor.",
     inputSchema: {
       servidor: z.string().describe("Nome (ou parte do nome) do servidor no servers.json"),
       ambiente: z.string().optional().describe("Ambiente; padrão: o último usado no TDS"),
@@ -313,6 +323,7 @@ server.registerTool(
       ambiente: active.environment,
       usuario: active.user,
       autenticacao: active.authMethod,
+      prefixoWrapper: prefixoWrapper(),
     });
   })
 );
@@ -338,7 +349,8 @@ server.registerTool(
       "corrompidos no RPO). Aceita fontes e recursos (.tres, .png, imagens, layouts). " +
       "temporario=true para fonte que não faz parte da entrega (wrapper de teste, fonte de " +
       "experimento): ele entra no registro de temporários e pode ser removido depois com " +
-      "tds_rpo_delete. Compilar o mesmo fonte sem a marca tira ele do registro.",
+      "tds_rpo_delete. Compilar o mesmo fonte sem a marca tira ele do registro. Nomeie o " +
+      "temporário com o `prefixoWrapper` de tds_use_server; sem ele vem `avisoNome`.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
@@ -360,6 +372,9 @@ server.registerTool(
       options,
       aceitarMisto ?? false
     );
+    const semPrefixo = temporario
+      ? expanded.map(nomeNoRpo).filter((n) => !n.startsWith(prefixoWrapper().toUpperCase()))
+      : [];
     // Só o que foi gravado no RPO muda o registro: build revertido não grava nada.
     let avisoRegistro: string | undefined;
     if (verdict.sucesso) {
@@ -375,6 +390,13 @@ server.registerTool(
       servidor: active.def.name,
       ambiente: active.environment,
       ...(temporario && verdict.sucesso && !avisoRegistro ? { registradosComoTemporarios: expanded.map(nomeNoRpo) } : {}),
+      ...(semPrefixo.length
+        ? {
+            avisoNome:
+              `Sem o prefixo desta máquina (${prefixoWrapper()}): ${semPrefixo.join(", ")}. Outro desenvolvedor ` +
+              "pode ter um temporário de mesmo nome no RPO, e esta compilação substitui o dele.",
+          }
+        : {}),
       ...(avisoRegistro ? { avisoRegistro } : {}),
       ...(mistoAceito.length ? { encodingMistoAceito: mistoAceito } : {}),
       totalFontes: expanded.length,
@@ -572,6 +594,7 @@ server.registerTool(
       servidor: active.def.name,
       ambiente: active.environment,
       registro: TEMPORARIOS_FILE,
+      prefixoWrapper: prefixoWrapper(),
       temporarios: registrados.map((t) => ({ ...t, noRpo: noRpo.has(t.fonte) })),
     });
   })
@@ -1332,9 +1355,14 @@ async function sourceFreshness(files: string[]): Promise<string[]> {
     const rpo = parseRpoDate(hit.date);
     const local = fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs;
     if (rpo !== undefined && local !== undefined && Math.abs(Math.floor(local / 1000) * 1000 - rpo) > 2000) {
+      const localMaisNovo = local > rpo;
       avisos.push(
         `${path.basename(file)}: o arquivo local (${new Date(local).toLocaleString("pt-BR")}) não é o compilado no ` +
-          `RPO (${hit.date}). As linhas dos breakpoints podem não bater; recompile com tds_compile.`
+          `RPO (${hit.date}) e as linhas dos breakpoints podem não bater. ` +
+          (localMaisNovo
+            ? "O arquivo local é mais novo: compile-o com tds_compile para depurar esta versão."
+            : "O RPO tem uma versão mais nova que a local (compilada depois, talvez por outra pessoa): não " +
+              "compile por cima sem perguntar ao usuário; atualize o fonte local ou depure a versão do RPO.")
       );
     }
   }
@@ -1439,7 +1467,10 @@ server.registerTool(
       "aberta. modo 'job': também captura threads novas do ambiente (StartJob, REST), inclusive " +
       "jobs alheios do servidor; use só em AppServer de desenvolvimento dedicado. Com " +
       "aguardarSeg > 0 espera a primeira parada e já devolve o estado como tds_debug_wait. Uma " +
-      "sessão por vez; encerre com tds_debug_stop. Os fontes dos breakpoints precisam estar " +
+      "sessão por vez neste tds-mcp (outras sessões do Claude e outros desenvolvedores depuram " +
+      "em paralelo no mesmo AppServer; nos modos headless e navegador os breakpoints valem só " +
+      "para a thread desta execução, no modo job para toda thread nova); encerre com " +
+      "tds_debug_stop. Os fontes dos breakpoints precisam estar " +
       "compilados (`avisos` aponta arquivo local diferente do RPO e linha onde o depurador não para).",
     inputSchema: {
       programa: z
@@ -1474,7 +1505,10 @@ server.registerTool(
       pastaFontes: z
         .string()
         .optional()
-        .describe("Pasta dos fontes locais (padrão: pasta do primeiro breakpoint)"),
+        .describe(
+          "Pasta onde o depurador procura os fontes locais citados na pilha (padrão: pasta do primeiro " +
+            "breakpoint). Informe quando não houver breakpoint ou quando os fontes estiverem em outra pasta"
+        ),
       pastaDownloads: z
         .string()
         .optional()
@@ -1659,7 +1693,8 @@ server.registerTool(
     description:
       "Encerra a sessão de depuração: libera a thread parada num breakpoint e fecha o navegador " +
       "headless. Sempre chame ao terminar, inclusive depois de erro. Sessão sem uso encerra " +
-      "sozinha depois de debugIdleMinutes do config (padrão 10 min; no modo navegador, o triplo). " +
+      "sozinha depois de debugIdleMinutes de ~/.tds-mcp/config.json (padrão 10 min; no modo " +
+      "navegador, o triplo). " +
       "Devolve `encerrada` (false = não havia sessão ativa). No modo navegador a aba é do " +
       "chrome-devtools e vem `fecharAba`: texto com o nome do contexto isolado (tds-<id>, o " +
       "mesmo de abrirCom); ache a aba com list_pages (ela mostra isolatedContext=tds-<id> e a " +
@@ -1687,8 +1722,10 @@ server.registerTool(
       "esgotado a execução é encerrada: o navegador fecha e a thread termina (confira com " +
       "tds_monitor_users se a rotina estava num processamento longo). Não devolve o valor de " +
       "retorno da função. A função roda SEM empresa aberta (sem xFilial, SX, MV_): rotina que " +
-      "precisa de ambiente vai num wrapper U_zTst... com RpcSetEnv, ou em tds_debug_start com " +
-      "modulo. `programa` aceita só o nome da função; os argumentos chegam todos como caractere " +
+      "precisa de ambiente vai num wrapper com RpcSetEnv, nomeado com o `prefixoWrapper` de " +
+      "tds_use_server, ou em tds_debug_start com modulo. Caminho de arquivo passado à função " +
+      "vale no AppServer, não na máquina do desenvolvedor. `programa` aceita só o nome da " +
+      "função; os argumentos chegam todos como caractere " +
       "(passe ['10'] e a função recebe \"10\"): parâmetro numérico, lógico ou data também pede " +
       "wrapper. Arquivos que o programa manda ao navegador (PDF do FWMSPrinter, CpyS2TW) vêm em " +
       "`arquivosBaixados` com o caminho local. Diálogo não tem como ser respondido aqui: " +

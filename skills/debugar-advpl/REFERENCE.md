@@ -64,16 +64,22 @@ A carga do módulo pode levar minutos; enquanto carrega, `take_snapshot` mostra
 ## Wrapper de teste
 
 Para rotina com parâmetro e ambiente, ou cenário montado (registro posicionado,
-respostas de pergunta):
+respostas de pergunta). Nome: `prefixoWrapper` (devolvido por `tds_use_server`, único por
+pessoa e máquina) + 3 letras da rotina, e o arquivo com o mesmo nome (`zTK3FRel.prw`).
+No mesmo RPO outro desenvolvedor pode ter o dele, e compilar por cima troca o wrapper do
+colega. Não passe de 8 caracteres depois do `U_`: o AdvPL só considera os 10 primeiros
+do nome da função.
 
 ```advpl
 #include "totvs.ch"
 
-User Function zTstRel()
+User Function zTK3FRel()
     RpcSetType(3)
-    RpcSetEnv("01", "0101")          // empresa e filial pedidas pelo usuário
+    // empresa e filial informadas pelo usuario; o 5o parametro e o modulo
+    // (cModulo/nModulo como no menu), ex.: "EST" para Estoque
+    RpcSetEnv("01", "0101", , , "EST")
     Pergunte("ZRELOP", .F.)          // carrega as perguntas sem tela...
-    MV_PAR01 := "000123"             // ...e define as respostas
+    MV_PAR01 := "000123"             // ...e define as respostas informadas pelo usuario
     SC2->(DbSetOrder(1))
     SC2->(DbSeek(xFilial("SC2") + "000123"))
     U_zRelOp()
@@ -82,17 +88,31 @@ Return
 ```
 
 Rotina que só precisa de parâmetro com tipo (numérico, lógico, data) e não usa
-empresa dispensa o `RpcSetEnv`:
+empresa dispensa o `RpcSetEnv`. Para ver o valor de retorno, guarde-o numa variável e
+rode no modo headless com `rastro: ["xRet"]` na linha do `Return`: o valor vem em
+`mensagens` (nível RASTRO).
 
 ```advpl
-User Function zTstCalc()
-Return U_zCalc("A", 10)
+User Function zTK3FCal()
+    Local xRet := U_zCalc(5, .T.)
+Return xRet
 ```
 
-Grave o wrapper em CP1252, numa pasta de trabalho da tarefa (fora do código do
-projeto), compile com `temporario: true` e remova no fim (seção "Fontes temporários").
+Escreva o wrapper só com ASCII (sem acento, nem em comentário): assim ele é válido em
+CP1252, que é o que `tds_compile` exige, mesmo gravado por uma ferramenta que salva em
+UTF-8. Grave numa pasta temporária ou de rascunho da tarefa, fora do código do projeto,
+compile com `temporario: true` e remova no fim (seção "Fontes temporários").
 O `RpcSetEnv` abre o ambiente em modo automático: `Pergunte(.T.)` não mostra tela e a
 data sai com ano de 2 dígitos; para reproduzir o que o usuário vê, use `modulo`.
+
+Antes de definir `MV_PARxx` no wrapper, leia o fonte da rotina: se ela chama o próprio
+`Pergunte(cPerg, .T.)`, ele recarrega as respostas salvas do usuário e descarta as do
+wrapper, e o resultado sai com outros parâmetros. Nesse caso, rode no modo navegador com
+`modulo` e responda o `Pergunte` na tela.
+
+Arquivo de entrada (CSV, TXT): o caminho que a rotina recebe vale no AppServer, não na
+máquina do desenvolvedor. Use uma pasta do servidor que já tenha o arquivo (confira com
+`tds_server_files`) ou peça ao usuário para copiá-lo para lá.
 
 ## Headless (`tds_run` e modo `headless`)
 
@@ -109,6 +129,13 @@ data sai com ano de 2 dígitos; para reproduzir o que o usuário vê, use `modul
   onde gravar, por exemplo a pasta da tarefa.
 
 ## REST e jobs (modo `job`)
+
+Para depurar só a lógica de um job, ou a função de negócio que um endpoint REST chama,
+chame essa função num wrapper, no modo headless: não precisa do modo `job` nem de mexer
+no AppServer. O método do endpoint (`@Get` em TLPP, `WSMETHOD`) depende do objeto da
+requisição (`oRest`, `Self`) e não roda num wrapper; para depurá-lo, ou a thread exata
+que o `StartJob` cria, use o modo `job`. Sem o usuário confirmar que o AppServer é de
+desenvolvimento dedicado, fique no wrapper e diga o que ficou de fora.
 
 Só threads criadas depois que o depurador conecta são depuráveis, e o modo `job`
 captura toda thread nova do ambiente, inclusive jobs do próprio servidor (ex.:
@@ -132,9 +159,6 @@ Receita da documentação do depurador do tds-vscode:
 5. Dispare a requisição por fora (curl, Postman, a tela que chama a API); endereço,
    porta e autenticação do endpoint vêm do usuário. Depois, `tds_debug_wait`.
 
-Para depurar só a lógica (sem o caminho HTTP), é mais simples chamar a função do serviço
-num wrapper, no modo headless.
-
 Verificado: breakpoint em função iniciada por `StartJob` para, com os parâmetros
 recebidos visíveis. Não verificado: REST na porta multiprotocolo da 12.1.2510 (há
 relato aberto na TOTVS de breakpoint que não para nesse cenário).
@@ -154,7 +178,8 @@ TOTVS é sempre recusado.
 
 - **Formulário "Parâmetros Iniciais" no lugar do programa**: a URL foi aberta fora do
   contexto isolado. Feche a aba e abra de novo com `new_page` + `isolatedContext`.
-- **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes` sem uso
+- **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes`
+  (`~/.tds-mcp/config.json`) sem uso
   (padrão 10 min; no modo navegador, 30), a próxima chamada falha dizendo qual aba
   fechar. Feche-a (`list_pages` mostra `isolatedContext=tds-<id>` e a URL com
   `DEBUG=<id>`), confira com `tds_monitor_users` se sobrou thread da execução e, com

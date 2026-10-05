@@ -4,13 +4,20 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadTemporarios, registrarCompilacao, removerTemporarios, temporariosDe } from "../dist/temporarios.js";
+import { loadTemporarios, prefixoWrapper, registrarCompilacao, removerTemporarios, temporariosDe } from "../dist/temporarios.js";
 
 let falhas = 0;
 function check(nome, condicao, detalhe = "") {
   if (!condicao) falhas++;
   console.log(`${condicao ? "PASS" : "FAIL"}  ${nome}${detalhe ? `\n      ${detalhe}` : ""}`);
 }
+
+// prefixo do wrapper: "zT" + 3 caracteres, estável por usuário@máquina
+const p = prefixoWrapper("ana", "PC01");
+check("prefixo tem zT + 3 caracteres (cabe nos 10 do nome com U_ e 3 letras)", /^zT[0-9A-Z]{3}$/.test(p), p);
+check("prefixo estável e sem diferenciar maiúsculas", prefixoWrapper("ANA", "pc01") === p);
+const outros = new Set(["bruno@PC02", "carla@PC03", "ana@PC02", "bruno@PC01"].map((k) => prefixoWrapper(...k.split("@"))));
+check("usuários ou máquinas diferentes dão prefixos diferentes", outros.size === 4 && !outros.has(p), [...outros].join(","));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-temp-"));
 const file = path.join(dir, "sub", "temporarios.json");

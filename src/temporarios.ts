@@ -24,6 +24,19 @@ export interface Temporario {
   compiladoEm: string;
 }
 
+/**
+ * Prefixo do nome de wrapper desta pessoa nesta máquina: "zT" + 3 caracteres
+ * derivados de usuário@máquina, estável entre sessões. Com 3 letras da rotina
+ * o nome tem 8 caracteres: "U_" + 8 são os 10 que o AdvPL considera no nome
+ * de função, e wrappers de desenvolvedores diferentes não colidem no RPO.
+ */
+export function prefixoWrapper(usuario = os.userInfo().username, maquina = os.hostname()): string {
+  const chave = `${usuario}@${maquina}`.toLowerCase();
+  let h = 0;
+  for (const c of chave) h = (Math.imul(h, 31) + c.charCodeAt(0)) >>> 0;
+  return "zT" + (h % 36 ** 3).toString(36).toUpperCase().padStart(3, "0");
+}
+
 export function nomeNoRpo(arquivo: string): string {
   return path.basename(arquivo).toUpperCase();
 }

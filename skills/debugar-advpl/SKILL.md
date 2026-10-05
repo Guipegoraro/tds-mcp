@@ -25,43 +25,72 @@ com o caminho local, nos modos headless e job.
 
 ## Passos
 
-1. **Licença.** Pergunte ao usuário: "Posso compilar `<fontes>` e executar/depurar
-   `<programa>` em `<servidor>/<ambiente>`?" Compilar troca no RPO a versão que estiver
-   lá (num ambiente compartilhado, a de um colega); o programa roda de verdade, grava o
-   que gravar, e parado num breakpoint segura a thread no servidor. A licença vale para
-   aquele servidor nesta conversa.
-   Concluído quando: o usuário autorizou fontes, servidor e ambiente.
+1. **Licença.** Pergunte ao usuário: "Posso executar/depurar `<programa>` em
+   `<servidor>/<ambiente>`?" e, se for compilar algo (passo 3), cite os fontes na mesma
+   pergunta. O programa roda de verdade, grava o que gravar, e parado num breakpoint
+   segura a thread no servidor; compilar troca no RPO a versão que estiver lá (num
+   ambiente compartilhado, a de um colega). Ambiente de produção: confirme de novo, à
+   parte, antes de executar ou compilar. A licença vale para aquele servidor nesta
+   conversa.
+   Concluído quando: o usuário autorizou servidor, ambiente e o que será compilado.
 
 2. **Caminho.** Escolha pelo que a rotina precisa:
-   - Saber se roda ou qual erro dá, sem tela e sem empresa: `tds_run`. A função roda
-     sem empresa aberta (sem `xFilial`, SX, `MV_`).
-   - Rotina sem tela: `tds_debug_start` modo `headless` (também sem empresa aberta).
+   - Saber se roda ou qual erro dá, sem tela, sem empresa e em até ~100 s: `tds_run`
+     com `timeoutSeg` adequado (padrão 60; no tempo esgotado a execução é interrompida no
+     meio). A função roda sem empresa aberta (sem `xFilial`, SX, `MV_`). O `tds_run` não
+     devolve o valor de retorno: para ver o que a função devolve, use o wrapper com
+     `rastro` no `Return` (REFERENCE.md, "Wrapper de teste").
+   - Rotina sem tela, ou processamento que pode passar de 100 s: `tds_debug_start` modo
+     `headless`, repetindo `tds_debug_wait` (também sem empresa aberta).
    - Rotina que usa o ambiente do usuário (empresa e filial, `Pergunte`, `MV_`) ou tem
      tela: modo `navegador` com `modulo` e a rotina em `programa`. Sem o módulo no
      pedido, pergunte ao usuário em qual módulo a rotina roda. Você faz o login e
      confirma as telas de entrada no chrome-devtools (REFERENCE.md, "Rotina dentro do
      módulo").
    - Rotina com parâmetro numérico, lógico ou data (`argumentos` chegam sempre como
-     caractere e não combinam com `modulo`), com parâmetro e ambiente ao mesmo tempo, ou
-     cujo arquivo gerado (PDF) você precisa conferir: wrapper `U_zTst...` que monta o
-     cenário e chama a rotina, rodado com `tds_run` ou no modo headless (o arquivo volta
-     em `arquivosBaixados`) e compilado como **temporário** (passo 3; REFERENCE.md,
-     "Wrapper de teste"). Empresa e filial do `RpcSetEnv` vêm do usuário; sem elas,
-     pergunte.
-   - StartJob, REST, job: modo `job`, só em AppServer de desenvolvimento dedicado
-     (REFERENCE.md, "REST e jobs").
+     caractere e não combinam com `modulo`), com parâmetro e ambiente ao mesmo tempo,
+     chamada por StartJob/agendamento, ou cujo arquivo gerado (PDF) você precisa
+     conferir: wrapper que monta o cenário e chama a rotina, com nome = `prefixoWrapper`
+     (devolvido por `tds_use_server`, único por pessoa e máquina) + 3 letras da rotina,
+     ex.: `U_zTK3FRel` (no mesmo RPO outro desenvolvedor pode ter o dele), rodado com
+     `tds_run` ou no modo headless (o arquivo volta em `arquivosBaixados`) e compilado
+     como **temporário** (REFERENCE.md, "Wrapper de teste"). Empresa, filial e respostas
+     de pergunta (`MV_PARxx`) vêm do usuário; sem elas, pergunte. Função que já recebe
+     empresa e filial e abre o próprio ambiente roda direto, com elas em `argumentos`.
+   - O caminho HTTP de um REST, ou a thread exata que o StartJob cria: modo `job`, só
+     quando o usuário confirmar que o AppServer é de desenvolvimento dedicado e quem
+     ajusta o appserver.ini (REFERENCE.md, "REST e jobs").
+   - Pedido com arquivo e linha, sem dizer que rotina executa aquele trecho: pergunte a
+     rotina ou o menu de entrada; o `programa` é o ponto de entrada, não a função que
+     contém a linha.
    Concluído quando: o caminho escolhido cobre o que a rotina precisa de ambiente e de
    parâmetro.
 
 3. **Fonte alinhado.** `tds_use_server` no servidor autorizado (com `usuario` e `senha`
-   quando o usuário os passar; valem só para a sessão) e `tds_compile` do fonte local: o
-   depurador casa breakpoint por nome de arquivo e linha. Wrapper e fonte de teste vão
+   quando o usuário os passar; valem só para a sessão). Confira a rotina testada e os
+   fontes dos breakpoints: `tds_rpo_objects` mostra a data do fonte no RPO (compare com a
+   do arquivo local) e o `tds_debug_start` traz em `avisos` o arquivo local diferente do
+   RPO, dizendo qual lado é mais novo. Se o arquivo local é mais novo, pergunte se o
+   teste é da versão local (compilar) ou da que está no RPO. Se o RPO é mais novo (outra
+   pessoa compilou depois), não compile por cima: pergunte ao usuário. Para rodar o que já está no RPO, não compile. Compilar fonte
+   que a licença do passo 1 não citou pede nova pergunta. Wrapper e fonte de teste vão
    com `temporario: true`, o que permite removê-los do RPO no fim.
-   Concluído quando: a compilação deu `sucesso` ou `SKIPPED`, e o `tds_debug_start` não
-   trouxer `avisos` de fonte divergente.
+   - Compilação com erro: o RPO continua com a versão anterior e os breakpoints cairiam
+     nas linhas dela. Mostre o erro ao usuário e pergunte se corrige o fonte ou depura a
+     versão do RPO (aí sem breakpoint pelo arquivo local alterado).
+   - `avisos` de fonte divergente depois do start: `tds_debug_stop`, compile (com
+     licença para aquele fonte) e inicie de novo; não compile com a sessão aberta. O
+     aviso compara datas de arquivo: se o `tds_compile` devolver `SKIPPED`, o conteúdo é o
+     mesmo do RPO (a data mudou por um checkout do git, por exemplo) e o aviso pode ser
+     ignorado.
+   Concluído quando: o RPO tem a versão do fonte dos breakpoints (sem `avisos` de fonte
+   divergente) ou o usuário decidiu depurar a versão do RPO.
 
-4. **Breakpoints no caso certo.** Ponha o breakpoint numa linha com instrução
-   (atribuição, chamada, `If`, `While`, `For`, `Return`); `avisos` aponta linha onde o
+4. **Breakpoints no caso certo.** Para investigar um erro de execução sem saber onde
+   ele está, rode primeiro sem breakpoint: `erroDeExecucao` traz fonte, linha e pilha;
+   depois ponha o breakpoint antes da linha do erro e rode de novo. Ponha o breakpoint
+   numa linha com instrução (atribuição, chamada, `If`, `While`, `For`, `Return`);
+   `avisos` aponta linha onde o
    depurador não para. Prefira `condicao` que isole o caso investigado
    (`nI == 50`, `SA1->A1_COD == "000123"`) a parar em toda passagem; em laço longo, use
    `rastro` para colher valores sem parar.
