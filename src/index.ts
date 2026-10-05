@@ -27,6 +27,7 @@ import { resolveChromiumPath } from "./webapp.js";
 import { lintFiles } from "./linter.js";
 import { DebugManager, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
+import { programaInicial } from "./modulos.js";
 import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding.js";
 import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
@@ -1195,10 +1196,17 @@ async function sourceFreshness(files: string[]): Promise<string[]> {
 async function startDebug(args: {
   programa: string;
   argumentos?: string[];
+  modulo?: string;
   breakpoints?: { arquivo: string; linha: number; condicao?: string; log?: string; contagem?: string; rastro?: string[] }[];
   modo: DebugMode;
   pastaFontes?: string;
 }) {
+  if (args.modulo && args.modo !== "navegador") {
+    throw new Error(
+      "modulo exige modo 'navegador': o SIGABPM pede login e diálogos do módulo, operados no chrome-devtools."
+    );
+  }
+  const inicial = programaInicial(args.programa, args.argumentos ?? [], args.modulo);
   const { session } = await ensureClient();
   const active = session.required();
   const byFile: Record<string, BreakpointSpec[]> = {};
@@ -1219,8 +1227,9 @@ async function startDebug(args: {
     adapterPath,
     chromiumPath: args.modo === "navegador" ? undefined : resolveChromiumPath(config.chromiumPath),
     webappUrl: webappUrlFor(active.def),
-    programa: args.programa,
-    argumentos: args.argumentos ?? [],
+    programa: inicial.programa,
+    argumentos: inicial.argumentos,
+    descricao: inicial.codigoModulo ? `${args.programa} (módulo ${inicial.codigoModulo})` : undefined,
     breakpoints: byFile,
     modo: args.modo,
     pastaFontes,
@@ -1258,17 +1267,35 @@ server.registerTool(
       "debugAdapter da TOTVS e o SmartClient HTML (webapp). Pergunte ao usuário antes de depurar " +
       "num servidor: o programa roda de verdade e, parado num breakpoint, segura a thread. " +
       "modo 'headless': o tds-mcp abre o programa num navegador invisível — para rotinas sem " +
-      "tela. modo 'navegador': devolve `url`; abra-a no navegador do chrome-devtools " +
-      "(navigate_page na aba existente) para operar as telas do programa durante a depuração, " +
-      "depois chame tds_debug_wait. modo 'job': também captura threads novas do ambiente " +
+      "tela. modo 'navegador': devolve `abrirCom` ({url, isolatedContext}); abra com new_page do " +
+      "chrome-devtools passando os dois — sem o contexto isolado, o perfil do navegador guarda o " +
+      "último programa e o WebAgent, e o webapp descarta os parâmetros da URL. Opere as telas no " +
+      "chrome-devtools e acompanhe com tds_debug_wait. modulo (só no modo navegador): roda a rotina " +
+      "dentro do módulo, como o usuário no menu (empresa, filial, data base, MV_ e variáveis do " +
+      "módulo); a tela pede login e confirma diálogos do módulo antes de a rotina começar. Sem " +
+      "modulo, a função é o programa inicial e roda sem empresa aberta; um wrapper com RpcSetEnv " +
+      "abre o ambiente em modo automático (Pergunte não mostra tela, data com ano de 2 dígitos). modo 'job': também captura threads novas do ambiente " +
       "(StartJob, REST) — mas pode capturar jobs alheios do servidor; use só em AppServer de " +
       "desenvolvimento dedicado. Com aguardarSeg > 0 espera a primeira parada e já devolve o " +
       "estado (local, pilha, variáveis Local/Private/Static). Uma sessão por vez; encerre com " +
       "tds_debug_stop. Os fontes dos breakpoints precisam estar compilados (o retorno avisa " +
       "quando o arquivo local difere do RPO).",
     inputSchema: {
-      programa: z.string().min(1).describe("Função a executar, como no SmartClient (ex.: u_zMinhaRotina)"),
-      argumentos: z.array(z.string()).optional().describe("Parâmetros do programa (equivalem a -A/&A=), chegam como caractere"),
+      programa: z
+        .string()
+        .min(1)
+        .describe("A rotina a executar, como no SmartClient (ex.: u_zMinhaRotina). Nunca SIGAMDI/SIGABPM: use modulo"),
+      argumentos: z
+        .array(z.string())
+        .optional()
+        .describe("Parâmetros da rotina (equivalem a -A/&A=), chegam como caractere. Não combinam com modulo"),
+      modulo: z
+        .string()
+        .optional()
+        .describe(
+          "Módulo onde a rotina roda, por código ou nome (ex.: '04' ou 'SIGAEST'). O tds-mcp abre pelo " +
+            "SIGABPM; exige modo 'navegador'"
+        ),
       breakpoints: z.array(breakpointSchema).optional().default([]),
       modo: z.enum(["headless", "navegador", "job"]).optional().default("headless"),
       aguardarSeg: z
@@ -1283,15 +1310,33 @@ server.registerTool(
         .describe("Pasta dos fontes locais (padrão: pasta do primeiro breakpoint)"),
     },
   },
-  safe(async ({ programa, argumentos, breakpoints, modo, aguardarSeg, pastaFontes }) => {
+  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes }) => {
     const mode = (modo ?? "headless") as DebugMode;
-    const { session: s, breakpoints: bps, avisos } = await startDebug({ programa, argumentos, breakpoints, modo: mode, pastaFontes });
+    const { session: s, breakpoints: bps, avisos } = await startDebug({
+      programa,
+      argumentos,
+      modulo,
+      breakpoints,
+      modo: mode,
+      pastaFontes,
+    });
     const wait = aguardarSeg ?? (mode === "navegador" ? 0 : 60);
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
+    const contexto = `tds-${/[?&]DEBUG=(\d+)/.exec(s.url ?? "")?.[1] ?? Date.now()}`;
     return jsonResult({
       sessao: { programa: s.programa, servidor: s.servidor, ambiente: s.ambiente, modo: s.modo },
       ...(mode === "navegador"
-        ? { url: s.url, proximoPasso: "Abra a url no navegador do chrome-devtools e chame tds_debug_wait." }
+        ? {
+            abrirCom: { url: s.url, isolatedContext: contexto },
+            proximoPasso:
+              `Chame new_page do chrome-devtools com url e isolatedContext "${contexto}" de abrirCom. ` +
+              (modulo
+                ? "A tela pede login (usuário e senha do Protheus), depois confirma empresa/filial/data base, " +
+                  "o aviso de ambiente e diálogos do módulo (ex.: Moedas): confirme cada um; a carga do módulo " +
+                  "pode levar minutos. "
+                : "") +
+              "Acompanhe com tds_debug_wait (até 100 s por chamada) e veja a tela com take_snapshot.",
+          }
         : {}),
       breakpoints: bps,
       ...(avisos.length ? { avisos } : {}),
@@ -1308,8 +1353,10 @@ server.registerTool(
       "Espera o programa em depuração parar (breakpoint, passo) ou terminar e devolve o estado: " +
       "local, pilha, variáveis Local/Private/Static do topo, watches, o que mudou desde a parada " +
       "anterior e mensagens (logpoints, erros). estado 'executando' = ainda não parou no prazo " +
-      "(o programa pode estar esperando interação na tela). Erro de execução vem em " +
-      "erroDeExecucao (mensagem, pilha e variáveis da tela de erro) com estado 'encerrado'.",
+      "(o programa pode estar esperando interação na tela); no modo navegador, conectado=false " +
+      "indica que nenhum webapp abriu a sessão. Erro de execução vem em erroDeExecucao (mensagem, " +
+      "pilha e variáveis da tela de erro) com estado 'encerrado'. Use timeoutSeg até 100: " +
+      "chamada mais longa estoura o prazo de ferramenta do cliente.",
     inputSchema: {
       timeoutSeg: z.number().min(1).max(600).optional().default(60),
     },

@@ -96,7 +96,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre | **destrutivo** |
 | `tds_monitor_kill_user` | Derruba a sessão imediatamente | **destrutivo** |
 | `tds_run` | Executa uma função num SmartClient HTML invisível: concluído, erro (fonte/linha + pilha com variáveis) ou tempo esgotado (texto da tela) | **executa código** |
-| `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST) | **executa código** |
+| `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST); `modulo` roda a rotina dentro do módulo pelo SIGABPM | **executa código** |
 | `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
 | `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
 | `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela | read-only |
@@ -146,6 +146,17 @@ Para o Claude Code enxergá-la, ligue a pasta nas skills do usuário (Windows, s
 ```bat
 mklink /J "%USERPROFILE%\.claude\skills\debugar-advpl" "<repo>\skills\debugar-advpl"
 ```
+
+No modo navegador o tds-mcp devolve `abrirCom` (`url` e `isolatedContext`) para o agente abrir
+com `new_page` do chrome-devtools. O contexto isolado é necessário: o perfil normal do navegador
+guarda o último programa e o uso do TOTVS WebAgent, e o webapp então descarta os parâmetros da URL
+e roda o programa fora do depurador. `tds_debug_wait` informa `conectado` enquanto nenhum webapp
+abriu a sessão.
+
+Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABPM dentro do módulo,
+com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela
+pede login e confirma os diálogos de entrada do módulo; a rotina roda sem argumentos. Sem `modulo`,
+a função é o programa inicial e roda sem empresa aberta.
 
 Limitações do depurador TOTVS que as tools contornam: `evaluate` só no frame do topo (outros
 frames via `tds_debug_variables`), sem `setVariable` (use `x := v`), pause não interrompe thread

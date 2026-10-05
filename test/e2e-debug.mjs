@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { HeadlessWebapp, resolveChromiumPath } from "../dist/webapp.js";
 
 const serverName = process.argv[2] ?? process.env.TDS_MCP_TEST_SERVER;
 const environment = process.argv[3] ?? process.env.TDS_MCP_TEST_ENV;
@@ -193,16 +194,63 @@ try {
   );
   await call("tds_debug_stop");
 
-  // --- pausa por breakpoint incluído com o programa rodando (modo navegador = sem navegador próprio)
-  const nav = await call("tds_debug_start", { programa: "u_zTstDbg1", modo: "navegador" });
+  // --- modo navegador: URL para o agente abrir e sinal de conexão do webapp
+  const nav = await call("tds_debug_start", {
+    programa: "u_zTstDbg1",
+    modo: "navegador",
+    breakpoints: [{ arquivo: SRC, linha: L_SOMA }],
+  });
+  const abrir = nav.data?.abrirCom ?? {};
   check(
-    "debug_start navegador: devolve a URL do webapp com DEBUG",
-    /\?DEBUG=\d+&E=.+&P=u_zTstDbg1/i.test(nav.data?.url ?? "") && nav.data?.estado === "executando",
-    nav.data?.url
+    "debug_start navegador: devolve url com DEBUG e contexto isolado",
+    /\?DEBUG=\d+&E=.+&P=u_zTstDbg1/i.test(abrir.url ?? "") && /^tds-\d+$/.test(abrir.isolatedContext ?? "") && nav.data?.estado === "executando",
+    short(abrir)
   );
   const wait = await call("tds_debug_wait", { timeoutSeg: 5 });
-  check("debug_wait sem navegador aberto: continua executando", wait.data?.estado === "executando", short(wait.data));
+  check(
+    "debug_wait sem webapp aberto: executando com conectado=false",
+    wait.data?.estado === "executando" && wait.data?.conectado === false,
+    short(wait.data)
+  );
+  // Abre a URL como o agente faria no chrome-devtools: navegador com perfil limpo.
+  const baseNav = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-e2e-nav-"));
+  const pagina = await HeadlessWebapp.open(resolveChromiumPath(), abrir.url, baseNav);
+  try {
+    const parou = await call("tds_debug_wait", { timeoutSeg: 60 });
+    check(
+      "webapp aberto pela url: para no breakpoint",
+      parou.data?.estado === "parado" && parou.data?.local?.linha === L_SOMA,
+      short(parou.data?.local ?? parou.data)
+    );
+  } finally {
+    await call("tds_debug_stop");
+    await pagina.close();
+    fs.rmSync(baseNav, { recursive: true, force: true });
+  }
+
+  // --- modulo: abre pelo SIGABPM; combinações erradas são recusadas antes de iniciar
+  const mod = await call("tds_debug_start", { programa: "u_zTstDbg1", modulo: "SIGAEST", modo: "navegador" });
+  check(
+    "modulo: url pelo SIGABPM com código do módulo e a rotina",
+    /&P=SIGABPM&M=1&A=04&A=u_zTstDbg1$/i.test(mod.data?.abrirCom?.url ?? "") && /módulo 04/.test(mod.data?.sessao?.programa ?? ""),
+    short(mod.data?.abrirCom?.url ?? mod.data)
+  );
   await call("tds_debug_stop");
+  const recusas = await Promise.all([
+    call("tds_debug_start", { programa: "u_zTstDbg1", modulo: "04" }),
+    call("tds_debug_start", { programa: "u_zTstDbg1", modulo: "04", modo: "navegador", argumentos: ["x"] }),
+    call("tds_debug_start", { programa: "SIGAMDI", modo: "navegador" }),
+    call("tds_run", { programa: "SIGABPM", argumentos: ["04", "u_zTstDbg1"] }),
+  ]);
+  check(
+    "modulo: headless, argumentos e programa SIGAxxx são recusados",
+    recusas.every((r) => r.isError) &&
+      /modo 'navegador'/.test(recusas[0].data?.erro ?? "") &&
+      /sem argumentos/.test(recusas[1].data?.erro ?? "") &&
+      /use|modulo/.test(recusas[2].data?.erro ?? "") &&
+      /modulo/.test(recusas[3].data?.erro ?? ""),
+    short(recusas.map((r) => r.data?.erro))
+  );
 
   // --- concorrência: duas execuções ao mesmo tempo -> uma roda, a outra recebe "ocupado"
   const [r1, r2] = await Promise.all([

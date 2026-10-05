@@ -54,8 +54,11 @@ export interface StartOptions {
   adapterPath: string;
   chromiumPath?: string;
   webappUrl: string;
+  /** Programa inicial do webapp (a função, ou SIGABPM para rodar dentro de um módulo). */
   programa: string;
   argumentos: string[];
+  /** Como a sessão é apresentada (ex.: "u_zRotina (módulo 04)"); padrão: programa. */
+  descricao?: string;
   breakpoints: Record<string, BreakpointSpec[]>;
   modo: DebugMode;
   /** Pasta para o adaptador mapear nomes de fonte para arquivos locais. */
@@ -98,12 +101,13 @@ export class DebugSession {
   private previous = new Map<string, string>();
   private errorCapture?: WebappErrorCapture;
   private ended = false;
+  private conectado = false;
   private traces: { nivel: string; mensagem: string }[] = [];
 
   constructor(dap: DapClient, opts: StartOptions) {
     this.dap = dap;
     this.modo = opts.modo;
-    this.programa = opts.programa;
+    this.programa = opts.descricao ?? opts.programa;
     this.servidor = opts.active.def.name;
     this.ambiente = opts.active.environment;
   }
@@ -128,6 +132,21 @@ export class DebugSession {
       await sleep(250);
     }
     return undefined;
+  }
+
+  /**
+   * O webapp abriu a URL com DEBUG e o programa está sob o depurador. O único
+   * sinal do adaptador é a linha "GETACTION RECEBIDO" no log interno, gravada
+   * quando o SmartClient se conecta; nenhum evento DAP acompanha.
+   */
+  clienteConectado(): boolean {
+    if (this.conectado) return true;
+    try {
+      this.conectado = /GETACTION RECEBIDO/.test(fs.readFileSync(this.dap.internalLog, "utf8"));
+    } catch {
+      /* log ainda não criado ou já removido */
+    }
+    return this.conectado;
   }
 
   async setBreakpoints(file: string, specs: BreakpointSpec[]) {
@@ -174,16 +193,27 @@ export class DebugSession {
         }
       }
     }
+    return { estado: "executando", mensagens: this.takeLogs(), ...this.navegadorStatus() };
+  }
+
+  /** Conexão do webapp e o que conferir no chrome-devtools, no modo navegador. */
+  navegadorStatus(): { conectado?: boolean; dica?: string } {
+    if (this.modo !== "navegador") return {};
+    if (this.clienteConectado()) {
+      return {
+        conectado: true,
+        dica:
+          "O programa está sob o depurador, mas ainda não parou. Veja a tela no chrome-devtools " +
+          "(take_snapshot): ele pode esperar login, confirmação de diálogo ou mostrar o diálogo de erro " +
+          "(botões Detalhes/Fechar).",
+      };
+    }
     return {
-      estado: "executando",
-      mensagens: this.takeLogs(),
-      ...(this.modo === "navegador"
-        ? {
-            dica:
-              "No modo navegador o tds-mcp não vê a tela: confira no chrome-devtools se o programa " +
-              "espera interação ou mostra o diálogo de erro (botões Detalhes/Fechar).",
-          }
-        : {}),
+      conectado: false,
+      dica:
+        "Nenhum webapp se conectou a esta sessão: abra a url com new_page e isolatedContext (abrirCom). " +
+        "Se a página mostrar o formulário 'Parâmetros Iniciais', ela perdeu os parâmetros da URL e o " +
+        "programa digitado ali roda fora do depurador: feche a aba e abra de novo com isolatedContext.",
     };
   }
 
