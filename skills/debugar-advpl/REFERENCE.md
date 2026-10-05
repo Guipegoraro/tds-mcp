@@ -49,7 +49,9 @@ O agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop
 (`GetRemoteType()` 1, arquivo local, Excel, impressão, PDF abrindo no visualizador da
 máquina). O tds-mcp liga uma instância própria por execução: por padrão no modo navegador
 (o `abrirCom.url` já traz `AGENT-PORT`), e em `tds_run`/headless/job só com
-`webAgent: true` — use quando a rotina depender dele. O retorno traz `webAgent`: `ativo`,
+`webAgent: true` — use quando a rotina depender dele. O agente vem de `webAgentPath` no
+`~/.tds-mcp/config.json`, de `TDS_MCP_WEBAGENT` ou do WebAgent instalado na máquina; a versão
+precisa ser a que o webapp do servidor aceita. O retorno traz `webAgent`: `ativo`,
 ou `motivo` de seguir sem ele (nenhum agente na máquina, versão recusada pelo webapp,
 certificado não confiável).
 

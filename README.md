@@ -77,7 +77,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | Tool | Descrição | Efeito |
 |---|---|---|
 | `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
-| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada | sessão |
+| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada. Devolve `prefixoWrapper` (início do nome de wrapper de teste, único por pessoa e máquina) e `maquinaLocal` (o computador das suas execuções no monitor) | sessão |
 | `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `temporario` registra o fonte para remoção posterior | **grava no RPO** |
 | `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
 | `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`) | nenhum |
@@ -103,7 +103,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
 | `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela | read-only |
 | `tds_debug_evaluate` | Avalia expressão no ponto de parada; `x := v` altera o programa | **executa código** |
-| `tds_debug_watch` / `tds_debug_stop` | Expressões observadas a cada parada / encerra a sessão e libera a thread | depuração |
+| `tds_debug_watch` / `tds_debug_stop` | Expressões observadas a cada parada / encerra a sessão (a thread parada num breakpoint é encerrada ali) e o WebAgent dela; no modo navegador devolve `fecharAba` | depuração |
 
 ### Segurança operacional (leia antes de usar em cliente)
 
@@ -154,7 +154,8 @@ No modo navegador o tds-mcp devolve `abrirCom` (`url` e `isolatedContext`) para 
 com `new_page` do chrome-devtools. O contexto isolado é necessário: o perfil normal do navegador
 guarda o último programa e o uso do TOTVS WebAgent, e o webapp então descarta os parâmetros da URL
 e roda o programa fora do depurador. `tds_debug_wait` informa `conectado` enquanto nenhum webapp
-abriu a sessão.
+abriu a sessão. Ao terminar, `tds_debug_stop` devolve `fecharAba` com a aba a fechar (`close_page`):
+aberta, ela mantém no AppServer o programa que não estava parado num breakpoint.
 
 Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABPM dentro do módulo,
 com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela
