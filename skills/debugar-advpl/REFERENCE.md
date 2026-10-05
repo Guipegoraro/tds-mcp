@@ -36,8 +36,9 @@ botão "Detalhes" traz mensagem, linha, pilha com as variáveis de cada nível e
 ambiente; leia com `take_snapshot` e clique "Fechar" — só então a thread termina e o
 depurador registra o erro.
 
-Arquivo gerado no modo navegador: o download fica com o navegador do chrome-devtools e
-não volta em `arquivosBaixados` (e `tds_server_files` não lista nem baixa esse tipo de
+Arquivo gerado no modo navegador: com o WebAgent (padrão), o PDF abre no visualizador da
+máquina; com `webAgent: false`, o download fica com o navegador do chrome-devtools. Nos
+dois casos ele não volta em `arquivosBaixados` (e `tds_server_files` não lista nem baixa esse tipo de
 arquivo). Para receber o arquivo, rode um wrapper (seção "Wrapper de teste") com `tds_run`
 ou no modo headless. Se o usuário quer ver a tela do `Pergunte` e também o arquivo,
 são duas execuções: uma no navegador com `modulo`, outra com o wrapper.
@@ -53,11 +54,14 @@ ou `motivo` de seguir sem ele (nenhum agente na máquina, versão recusada pelo 
 certificado não confiável).
 
 - **Seguiu sem agente:** com `webAgent.ativo: false`, o programa rodou sem o WebAgent, e o
-  caminho que depende dele (arquivo local, Excel, `GetRemoteType()` 1) não foi exercitado.
-  Diga isso no relato; não dê esse caminho como testado.
+  caminho que depende dele (arquivo local, Excel, `GetRemoteType()` 1) não foi exercitado;
+  a rotina pode ter seguido o outro ramo de verdade (ex.: gravar no servidor em vez de na
+  máquina). Diga isso no relato, com o que esse ramo faz; não dê o caminho do agente como
+  testado. Repetir a execução repete os efeitos: pergunte ao usuário antes.
 - **Certificado não confiável:** o `motivo` traz o comando `Import-Certificate`. Ele altera os
-  certificados confiáveis do Windows: mostre ao usuário e só rode com autorização dele;
-  depois, execute de novo.
+  certificados confiáveis do Windows: mostre ao usuário e só rode com autorização dele.
+  Depois, a nova execução também precisa da licença do usuário (a anterior já rodou sem
+  agente).
 - **Agente recusado no navegador:** o `tds_debug_wait` volta `executando` com
   `conectado: false` e o aviso no campo `dica` (a tela mostra "Acesso não autorizado ao
   WebAgent"). Faça `tds_debug_stop`, `close_page` da aba e inicie de novo com
@@ -67,7 +71,8 @@ certificado não confiável).
   que ela usa — `GetTempPath()` com o agente pode ser uma pasta do webapp no servidor, não a
   máquina. `concluido` não prova que o arquivo existe: confira na tela ou peça ao usuário
   para conferir. Para receber o arquivo, rode sem agente.
-- **Encerramento:** o `tds_debug_stop` e o fim do `tds_run` encerram a instância do agente.
+- **Encerramento:** o `tds_debug_stop`, o fim do `tds_run` e o encerramento por inatividade
+  encerram a instância do agente.
   Visualizador de PDF ou Excel que o agente abriu são programas do usuário e continuam
   abertos.
 
@@ -141,8 +146,9 @@ data sai com ano de 2 dígitos; para reproduzir o que o usuário vê, use `modul
 Antes de definir `MV_PARxx` no wrapper, leia o fonte da rotina: se ela chama o próprio
 `Pergunte(cPerg, .T.)`, ele recarrega as respostas salvas do usuário e descarta as do
 wrapper, e o resultado sai com outros parâmetros. Nesse caso, rode no modo navegador com
-`modulo` e responda o `Pergunte` na tela. O PDF dessa execução fica com o navegador do
-chrome-devtools e não volta para você: peça ao usuário para abri-lo, ou rode também o
+`modulo` e responda o `Pergunte` na tela. O PDF dessa execução abre no visualizador da
+máquina (com o WebAgent) ou fica com o navegador do chrome-devtools (sem ele) e não volta
+para você: peça ao usuário para conferi-lo, ou rode também o
 wrapper e diga no relato que o arquivo dele saiu com as respostas salvas do usuário,
 não com as pedidas.
 

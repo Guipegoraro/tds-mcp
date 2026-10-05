@@ -140,7 +140,9 @@ com o caminho local, nos modos headless e job.
 ## Relato
 
 Relate o observado: linha, valores das variáveis relevantes, o que mudou entre paradas,
-erro com fonte/linha, arquivos gerados (`arquivosBaixados`). Se o WebAgent foi pedido e o
-retorno trouxe `webAgent.ativo: false`, diga que o caminho que depende dele não foi testado. Separe observado de
+erro com fonte/linha, arquivos gerados (`arquivosBaixados`). Quando a rotina depende do
+WebAgent (pedido com `webAgent: true` ou ligado pelo modo navegador) e o retorno trouxe
+`webAgent.ativo: false`, diga que o caminho do agente não foi testado e que a rotina pode
+ter seguido o outro ramo. Separe observado de
 hipótese. Se alterou variável com `:=`, diga qual e o valor. Diga se ficou fonte
 temporário no RPO.

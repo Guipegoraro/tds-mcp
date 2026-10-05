@@ -1538,7 +1538,7 @@ server.registerTool(
           "Caminho absoluto da pasta onde gravar os arquivos que o programa manda ao navegador (PDF do " +
             "FWMSPrinter, CpyS2TW), listados em arquivosBaixados no retorno de wait/step; padrão: " +
             "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Só modos headless e job: no modo " +
-            "navegador o download fica com o navegador do chrome-devtools"
+            "navegador o arquivo abre no visualizador da máquina (com WebAgent) ou fica com o navegador do chrome-devtools"
         ),
       webAgent: z
         .boolean()
@@ -1797,7 +1797,7 @@ server.registerTool(
           "Liga o TOTVS WebAgent para rotina que depende dele (arquivo local, Excel, GetRemoteType() 1). Com ele, " +
             "o PDF do FWMSPrinter abre no visualizador da máquina e não vem em arquivosBaixados. Se o agente " +
             "não conectar, a execução segue sem ele e `webAgent.motivo` diz por quê: aí o caminho que depende do " +
-            "agente não foi testado, mesmo com resultado concluido"
+            "agente não foi testado, mesmo com resultado concluido, e a rotina pode ter seguido o outro ramo (ex.: GetRemoteType() diferente de 1)"
         ),
     },
   },
