@@ -21,7 +21,8 @@ Dois vocabulários de resultado:
   `erroDeExecucao` ou mensagem de nível `ERROR`).
 
 Arquivo que o programa manda ao navegador (PDF, `CpyS2TW`) vem em `arquivosBaixados`,
-com o caminho local, nos modos headless e job.
+com o caminho local, nos modos headless e job sem WebAgent; com o agente ligado, o PDF
+abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
 
 ## Passos
 

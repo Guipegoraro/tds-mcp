@@ -1536,7 +1536,8 @@ server.registerTool(
         .optional()
         .describe(
           "Caminho absoluto da pasta onde gravar os arquivos que o programa manda ao navegador (PDF do " +
-            "FWMSPrinter, CpyS2TW), listados em arquivosBaixados no retorno de wait/step; padrão: " +
+            "FWMSPrinter, CpyS2TW), listados em arquivosBaixados no retorno de wait/step quando o WebAgent " +
+            "está desligado (com ele, o PDF abre no visualizador da máquina); padrão: " +
             "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Só modos headless e job: no modo " +
             "navegador o arquivo abre no visualizador da máquina (com WebAgent) ou fica com o navegador do chrome-devtools"
         ),
@@ -1604,7 +1605,8 @@ server.registerTool(
       "detalhes da tela de erro, com pilha e variáveis) ou numa mensagem de nível ERROR, e no modo " +
       "navegador vem `fecharAba`. Em qualquer estado: `mensagens` (logpoints, rastros com nível " +
       "RASTRO, erros) desde a chamada anterior e `arquivosBaixados` (arquivos que o programa mandou " +
-      "ao navegador, com caminho local; modos headless e job). Use timeoutSeg até 100 e repita " +
+      "ao navegador, com caminho local; modos headless e job sem WebAgent: com o agente o PDF abre " +
+      "no visualizador da máquina e não vem aqui). Use timeoutSeg até 100 e repita " +
       "enquanto vier 'executando': chamada mais longa pode ir para segundo plano no cliente.",
     inputSchema: {
       timeoutSeg: z.number().min(1).max(600).optional().default(60).describe("Segundos de espera; use até 100"),
