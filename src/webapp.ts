@@ -181,13 +181,13 @@ export class HeadlessWebapp {
     }
   }
 
-  private send(method: string, params: unknown = {}): Promise<any> {
+  private send(method: string, params: unknown = {}, timeoutMs = 5000): Promise<any> {
     return new Promise((resolve) => {
       const id = ++this.id;
       const timer = setTimeout(() => {
         this.pending.delete(id);
         resolve(undefined);
-      }, 5000);
+      }, timeoutMs);
       this.pending.set(id, (msg) => {
         clearTimeout(timer);
         resolve(msg);
@@ -253,8 +253,17 @@ export class HeadlessWebapp {
     }
   }
 
-  /** Encerra o navegador e espera ele sair (até 3 s), quando o perfil é apagado. */
-  close(): Promise<void> {
+  /**
+   * Sai da página do webapp e encerra o navegador, esperando ele sair (até
+   * 3 s), quando o perfil é apagado. Com o processo morto sem sair da página,
+   * o AppServer não percebe a desconexão e a thread que espera num diálogo
+   * fica presa; saindo da página, ela termina em segundos.
+   */
+  async close(): Promise<void> {
+    if (this.proc.exitCode === null && this.ws?.readyState === WebSocket.OPEN) {
+      await this.send("Page.navigate", { url: "about:blank" }, 1000);
+      await sleep(300);
+    }
     this.kill();
     return waitExit(this.proc, 3000);
   }
