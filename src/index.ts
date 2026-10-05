@@ -1469,7 +1469,8 @@ server.registerTool(
       "de entrada do módulo; a carga pode levar minutos. No tds_monitor_users essa thread aparece " +
       "como programa SIGABPM. Sem modulo, a função é o programa inicial e roda sem empresa " +
       "aberta. modo 'job': também captura threads novas do ambiente (StartJob, REST), inclusive " +
-      "jobs alheios do servidor; use só em AppServer de desenvolvimento dedicado. Com " +
+      "jobs do servidor e threads de outras pessoas conectadas; use só em AppServer exclusivo de " +
+      "quem depura (ninguém mais conectado, confirmado pelo usuário). Com " +
       "aguardarSeg > 0 espera a primeira parada e já devolve o estado como tds_debug_wait. Uma " +
       "sessão por vez neste tds-mcp (outras sessões do Claude e outros desenvolvedores depuram " +
       "em paralelo no mesmo AppServer; nos modos headless e navegador os breakpoints valem só " +

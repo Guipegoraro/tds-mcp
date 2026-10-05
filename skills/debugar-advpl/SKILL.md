@@ -58,7 +58,8 @@ com o caminho local, nos modos headless e job.
      de pergunta (`MV_PARxx`) vêm do usuário; sem elas, pergunte. Função que já recebe
      empresa e filial e abre o próprio ambiente roda direto, com elas em `argumentos`.
    - O caminho HTTP de um REST, ou a thread exata que o StartJob cria: modo `job`, só
-     quando o usuário confirmar que o AppServer é de desenvolvimento dedicado e quem
+     quando o usuário confirmar que o AppServer é exclusivo dele (nenhum outro
+     desenvolvedor ou usuário conectado; "é o de desenvolvimento" não basta) e quem
      ajusta o appserver.ini (REFERENCE.md, "REST e jobs").
    - Pedido com arquivo e linha, sem dizer que rotina executa aquele trecho: pergunte a
      rotina ou o menu de entrada; o `programa` é o ponto de entrada, não a função que
@@ -124,8 +125,11 @@ com o caminho local, nos modos headless e job.
    Concluído quando: `encerrada`, nenhuma aba `tds-*` aberta no chrome-devtools e
    `tds_monitor_users` sem thread da execução: filtre pelo programa inicial (`SIGABPM` com
    `modulo`, senão o nome da função ou do wrapper). A sua é a de `computador` igual ao
-   `maquinaLocal` do `tds_use_server` (sem diferenciar maiúsculas); no mesmo servidor
-   pode haver sessão de outro
+   `maquinaLocal` do `tds_use_server` (sem diferenciar maiúsculas). Exceção: thread
+   criada por StartJob ou REST (modo `job`) nasce no AppServer e traz o computador do
+   servidor; procure-a pelo nome da função do job e pela hora de conexão, e confira se o
+   wrapper que espera (`Sleep`) também terminou. No mesmo servidor pode haver sessão de
+   outro
    desenvolvedor com o mesmo programa e usuário. Derrubar thread (`tds_monitor_*`) só
    com autorização do usuário e quando a identificação não deixa dúvida; com dúvida,
    mostre a lista e pergunte.

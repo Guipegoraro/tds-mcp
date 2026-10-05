@@ -139,21 +139,24 @@ Para depurar só a lógica de um job, ou a função de negócio que um endpoint 
 chame essa função num wrapper, no modo headless: não precisa do modo `job` nem de mexer
 no AppServer. O método do endpoint (`@Get` em TLPP, `WSMETHOD`) depende do objeto da
 requisição (`oRest`, `Self`) e não roda num wrapper; para depurá-lo, ou a thread exata
-que o `StartJob` cria, use o modo `job`. Sem o usuário confirmar que o AppServer é de
-desenvolvimento dedicado, fique no wrapper e diga o que ficou de fora.
+que o `StartJob` cria, use o modo `job`. Sem o usuário confirmar que o AppServer é
+exclusivo (ninguém mais conectado), fique no wrapper e diga o que ficou de fora.
 
 Só threads criadas depois que o depurador conecta são depuráveis, e o modo `job`
 captura toda thread nova do ambiente, inclusive jobs do próprio servidor (ex.:
-`FWLSMANAGERPULSE`); quando uma dessas termina, a sessão pode encerrar. Por isso: AppServer
-de desenvolvimento dedicado e depurador iniciado primeiro.
+`FWLSMANAGERPULSE`) e as threads de qualquer outra pessoa conectada, que podem ficar
+paradas nos seus breakpoints; quando uma dessas termina, a sessão pode encerrar. Por
+isso: AppServer exclusivo de quem depura (ninguém mais conectado, confirmado pelo
+usuário) e depurador iniciado primeiro.
 
 Receita da documentação do depurador do tds-vscode:
 
 1. No appserver.ini do servidor de desenvolvimento: comentar o `[OnStart]` (ou deixar só
    os jobs necessários, com `RefreshRate=30`) e `[General] BUILDKILLUSERS=1` (compilar
    derruba todas as conexões da instância); reiniciar o AppServer.
-2. Encerrar threads antigas com `tds_monitor_users` + `tds_monitor_kill_user`, com
-   autorização do usuário.
+2. Encerrar threads antigas da sua própria execução com `tds_monitor_users` +
+   `tds_monitor_kill_user`, com autorização do usuário; se aparecer sessão de outra
+   pessoa, o servidor não é exclusivo: pare e avise.
 3. Compile antes de iniciar o depurador (com `BUILDKILLUSERS=1`, compilar derruba a
    sessão): o fonte do serviço e uma função que dispare o job e espere, como temporário:
    `User Function zStartRest()` → `StartJob("HTTP_START", GetEnvServer(), .F.)` →
