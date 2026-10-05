@@ -80,9 +80,11 @@ com o caminho local, nos modos headless e job.
      versão do RPO (aí sem breakpoint pelo arquivo local alterado).
    - `avisos` de fonte divergente depois do start: `tds_debug_stop`, compile (com
      licença para aquele fonte) e inicie de novo; não compile com a sessão aberta. O
-     aviso compara datas de arquivo: se o `tds_compile` devolver `SKIPPED`, o conteúdo é o
-     mesmo do RPO (a data mudou por um checkout do git, por exemplo) e o aviso pode ser
-     ignorado.
+     aviso compara datas de arquivo. Quando ele disse "arquivo local mais novo" e o
+     `tds_compile` devolveu `SKIPPED`, o conteúdo é o mesmo do RPO (a data mudou por um
+     checkout do git, por exemplo) e o aviso pode ser ignorado. Quando disse "RPO mais
+     novo", `SKIPPED` não prova nada: só compile a versão local se o usuário pedir, com
+     `recompile: true`.
    Concluído quando: o RPO tem a versão do fonte dos breakpoints (sem `avisos` de fonte
    divergente) ou o usuário decidiu depurar a versão do RPO.
 
@@ -121,8 +123,12 @@ com o caminho local, nos modos headless e job.
    servidor e ambiente.
    Concluído quando: `encerrada`, nenhuma aba `tds-*` aberta no chrome-devtools e
    `tds_monitor_users` sem thread da execução: filtre pelo programa inicial (`SIGABPM` com
-   `modulo`, senão o nome da função ou do wrapper) e confira `computador` e `usuario` —
-   no mesmo servidor pode haver sessão de outro desenvolvedor.
+   `modulo`, senão o nome da função ou do wrapper). A sua é a de `computador` igual ao
+   `maquinaLocal` do `tds_use_server` (sem diferenciar maiúsculas); no mesmo servidor
+   pode haver sessão de outro
+   desenvolvedor com o mesmo programa e usuário. Derrubar thread (`tds_monitor_*`) só
+   com autorização do usuário e quando a identificação não deixa dúvida; com dúvida,
+   mostre a lista e pergunte.
 
 ## Relato
 

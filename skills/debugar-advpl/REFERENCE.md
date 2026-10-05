@@ -17,7 +17,9 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    botões (componentes `wa-*`; rótulo com tecla de atalho aparece partido, "D" +
    "etalhes"). Campo caractere: `fill`. Campo numérico com máscara (`@E 999`): `fill`
    acrescenta ao valor existente — clique no campo, `press_key` `Control+A` e
-   `type_text`. Botão que não responde ao `click`: com ele em foco, `press_key` `Enter`.
+   `type_text`. Botão que não responde ao `click`: confirme no `take_snapshot` que é
+   ele que está com foco (marcado `focused`) e só então `press_key` `Enter`. Em diálogo
+   de sim/não o foco costuma estar em "Sim": nunca dê Enter sem essa conferência.
 4. `tds_debug_wait` (até 100 s por chamada) acompanha. `conectado: false` = nenhum webapp
    abriu esta sessão: confira a aba (passo 2). `conectado: true` com `executando` = o
    programa espera algo na tela. Parado, a tela congela; depois de
@@ -108,7 +110,10 @@ data sai com ano de 2 dígitos; para reproduzir o que o usuário vê, use `modul
 Antes de definir `MV_PARxx` no wrapper, leia o fonte da rotina: se ela chama o próprio
 `Pergunte(cPerg, .T.)`, ele recarrega as respostas salvas do usuário e descarta as do
 wrapper, e o resultado sai com outros parâmetros. Nesse caso, rode no modo navegador com
-`modulo` e responda o `Pergunte` na tela.
+`modulo` e responda o `Pergunte` na tela. O PDF dessa execução fica com o navegador do
+chrome-devtools e não volta para você: peça ao usuário para abri-lo, ou rode também o
+wrapper e diga no relato que o arquivo dele saiu com as respostas salvas do usuário,
+não com as pedidas.
 
 Arquivo de entrada (CSV, TXT): o caminho que a rotina recebe vale no AppServer, não na
 máquina do desenvolvedor. Use uma pasta do servidor que já tenha o arquivo (confira com

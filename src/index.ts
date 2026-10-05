@@ -7,6 +7,7 @@
  * (~/.totvsls/servers.json): servidores, ambientes, includes e token.
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -301,7 +302,9 @@ server.registerTool(
       "não são gravados). Sem eles, tenta o token de reconexão salvo pelo TDS e, se falhar, as " +
       "credenciais de ~/.tds-mcp/config.json. Devolve também `prefixoWrapper`: o início do nome " +
       "de wrapper de teste desta pessoa nesta máquina (ex.: zTK3F); complete com 3 letras da " +
-      "rotina (zTK3FCal) para não colidir no RPO com o wrapper de outro desenvolvedor.",
+      "rotina (zTK3FCal) para não colidir no RPO com o wrapper de outro desenvolvedor. " +
+      "`maquinaLocal` é o nome desta máquina: as execuções do tds_run e do tds_debug_start " +
+      "aparecem no tds_monitor_users com esse `computador` (compare sem diferenciar maiúsculas).",
     inputSchema: {
       servidor: z.string().describe("Nome (ou parte do nome) do servidor no servers.json"),
       ambiente: z.string().optional().describe("Ambiente; padrão: o último usado no TDS"),
@@ -324,6 +327,7 @@ server.registerTool(
       usuario: active.user,
       autenticacao: active.authMethod,
       prefixoWrapper: prefixoWrapper(),
+      maquinaLocal: os.hostname(),
     });
   })
 );
