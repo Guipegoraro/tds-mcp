@@ -1109,8 +1109,9 @@ server.registerTool(
   {
     title: "Listar pastas/arquivos do servidor",
     description:
-      "Lista subpastas e arquivos de uma pasta no sistema de arquivos do AppServer conectado " +
-      "(a mesma navegação que o tds-vscode usa para escolher pasta de patch no servidor). " +
+      "Lista as subpastas de uma pasta do AppServer conectado e, nela, só os arquivos de patch " +
+      "(é a navegação que o tds-vscode usa para escolher pasta de patch no servidor). Outros " +
+      "arquivos (CSV, TXT, PDF) não aparecem: não serve para conferir se um arquivo existe. " +
       "pasta vazia = raiz.",
     inputSchema: {
       pasta: z.string().optional().default("").describe("Caminho no servidor; vazio = raiz"),
@@ -1696,7 +1697,8 @@ server.registerTool(
   {
     title: "Depurar: encerrar sessão",
     description:
-      "Encerra a sessão de depuração: libera a thread parada num breakpoint e fecha o navegador " +
+      "Encerra a sessão de depuração: a thread parada num breakpoint é encerrada ali (não " +
+      "continua até o fim, então nada depois da parada é executado) e fecha o navegador " +
       "headless. Sempre chame ao terminar, inclusive depois de erro. Sessão sem uso encerra " +
       "sozinha depois de debugIdleMinutes de ~/.tds-mcp/config.json (padrão 10 min; no modo " +
       "navegador, o triplo). " +

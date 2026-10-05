@@ -25,7 +25,8 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    programa espera algo na tela. Parado, a tela congela; depois de
    `tds_debug_step continuar`, opere a tela de novo (MsgInfo, confirmações).
 5. Ao terminar, `tds_debug_stop` e `close_page` da aba `tds-<id>` (o retorno traz
-   `fecharAba`). O stop derruba a thread parada num breakpoint; a que roda ou espera um
+   `fecharAba`). O stop encerra a thread parada num breakpoint ali mesmo (o resto do
+   programa não roda); a que roda ou espera um
    diálogo continua no AppServer, já sem depurador, até a aba fechar. Cada sessão
    esquecida deixa também uma janela a mais. A janela `about:blank` é a do próprio
    chrome-devtools: fica aberta enquanto ele estiver ativo e não fecha por `close_page`.
@@ -36,8 +37,8 @@ ambiente; leia com `take_snapshot` e clique "Fechar" — só então a thread ter
 depurador registra o erro.
 
 Arquivo gerado no modo navegador: o download fica com o navegador do chrome-devtools e
-não volta em `arquivosBaixados`; `tds_server_files` só lista pastas do servidor, não
-baixa. Para receber o arquivo, rode um wrapper (seção "Wrapper de teste") com `tds_run`
+não volta em `arquivosBaixados` (e `tds_server_files` não lista nem baixa esse tipo de
+arquivo). Para receber o arquivo, rode um wrapper (seção "Wrapper de teste") com `tds_run`
 ou no modo headless. Se o usuário quer ver a tela do `Pergunte` e também o arquivo,
 são duas execuções: uma no navegador com `modulo`, outra com o wrapper.
 
@@ -50,9 +51,10 @@ só repassa módulo e rotina. Telas de entrada (variam por ambiente e versão):
 
 1. Login: usuário e senha do Protheus, os mesmos usados no `tds_use_server`; sem eles,
    peça ao usuário. `fill` nos dois campos e "Entrar".
-2. Data base, empresa (campo "Grupo") e filial, preenchidos com o último acesso desse
-   usuário. Se o usuário pediu outra empresa ou filial, troque com `fill` antes de
-   "Entrar".
+2. Data base, empresa (campo "Grupo") e filial, preenchidos com o último acesso daquele
+   usuário Protheus, que pode ter sido de um colega. Use a empresa e a filial do pedido;
+   sem elas no pedido, pergunte antes de "Entrar" (a rotina grava na empresa escolhida
+   aqui). Troque com `fill` se for preciso.
 3. Aviso de base de desenvolvimento, quando o ambiente for de desenvolvimento: "Fechar".
 4. Diálogos de entrada do módulo (no Estoque: "Moedas", com as taxas do dia, uma vez por
    dia): confirme.
@@ -116,8 +118,8 @@ wrapper e diga no relato que o arquivo dele saiu com as respostas salvas do usu�
 não com as pedidas.
 
 Arquivo de entrada (CSV, TXT): o caminho que a rotina recebe vale no AppServer, não na
-máquina do desenvolvedor. Use uma pasta do servidor que já tenha o arquivo (confira com
-`tds_server_files`) ou peça ao usuário para copiá-lo para lá.
+máquina do desenvolvedor. Peça ao usuário uma pasta do servidor que já tenha o arquivo,
+ou que o copie para lá (`tds_server_files` não lista esse tipo de arquivo).
 
 ## Headless (`tds_run` e modo `headless`)
 
@@ -158,14 +160,17 @@ Receita da documentação do depurador do tds-vscode:
    `tds_monitor_kill_user`, com autorização do usuário; se aparecer sessão de outra
    pessoa, o servidor não é exclusivo: pare e avise.
 3. Compile antes de iniciar o depurador (com `BUILDKILLUSERS=1`, compilar derruba a
-   sessão): o fonte do serviço e uma função que dispare o job e espere, como temporário:
-   `User Function zStartRest()` → `StartJob("HTTP_START", GetEnvServer(), .F.)` →
-   `Sleep(300000)`. Quando essa função termina, a sessão pode encerrar: o `Sleep` dá o
-   tempo de disparar a requisição.
-4. `tds_debug_start` modo `job`, `programa: "u_zStartRest"` e breakpoint no fonte do
+   sessão): o fonte do serviço e uma função que dispare o job e espere, como temporário
+   e nomeada com o `prefixoWrapper` (ex.: `User Function zTK3FRst()` →
+   `StartJob("HTTP_START", GetEnvServer(), .F.)` → `Sleep(300000)`). Quando essa função
+   termina, a sessão pode encerrar: o `Sleep` dá o tempo de disparar a requisição.
+4. `tds_debug_start` modo `job`, `programa: "u_zTK3FRst"` e breakpoint no fonte do
    serviço.
 5. Dispare a requisição por fora (curl, Postman, a tela que chama a API); endereço,
    porta e autenticação do endpoint vêm do usuário. Depois, `tds_debug_wait`.
+6. Ao terminar: `tds_debug_stop`, remova o temporário e peça a quem ajustou o
+   appserver.ini que restaure o `[OnStart]` e o `BUILDKILLUSERS` e reinicie o AppServer;
+   sem isso os jobs do servidor ficam parados e toda compilação derruba as conexões.
 
 Verificado: breakpoint em função iniciada por `StartJob` para, com os parâmetros
 recebidos visíveis. Não verificado: REST na porta multiprotocolo da 12.1.2510 (há
