@@ -72,7 +72,8 @@ no prazo; no headless vêm `tela` e `botoes`, no navegador vem `conectado`) ou
 
 8. **Encerramento.** `tds_debug_stop` ao terminar, inclusive quando a sessão falhou. No
    modo navegador, siga o `fecharAba` do retorno: `list_pages` e `close_page` da aba do
-   contexto `tds-<id>`; a thread no AppServer só termina quando a aba sai. Wrapper
+   contexto `tds-<id>`; programa que não estava parado num breakpoint segue no AppServer
+   até a aba sair. Wrapper
    temporário que cumpriu o papel: `tds_rpo_temporarios` mostra o que ficou no RPO;
    remova com `tds_rpo_delete` depois de o usuário confirmar.
    Concluído quando: `encerrada`, nenhuma aba `tds-*` aberta no chrome-devtools e

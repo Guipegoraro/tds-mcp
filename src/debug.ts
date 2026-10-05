@@ -232,8 +232,9 @@ export class DebugSession {
   }
 
   /**
-   * No modo navegador a aba é do chrome-devtools e o tds-mcp não a fecha:
-   * enquanto ela fica aberta, a thread continua no AppServer (sem depurador)
+   * No modo navegador a aba é do chrome-devtools e o tds-mcp não a fecha.
+   * Encerrar o depurador derruba a thread parada num breakpoint; a que roda
+   * ou espera um diálogo continua no AppServer enquanto a aba estiver aberta,
    * e cada sessão deixa uma janela a mais.
    */
   fecharAba(): { fecharAba?: string } {
@@ -241,7 +242,8 @@ export class DebugSession {
     return {
       fecharAba:
         `Feche a aba desta sessão no chrome-devtools: list_pages, ache a aba com isolatedContext=${this.contextoIsolado} ` +
-        "e chame close_page com o pageId dela. A thread no AppServer só termina quando a página sai.",
+        "e chame close_page com o pageId dela. Programa que não estava parado num breakpoint (rodando ou " +
+        "esperando um diálogo) continua no AppServer até a página sair.",
     };
   }
 

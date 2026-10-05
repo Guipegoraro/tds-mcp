@@ -342,7 +342,13 @@ export class HeadlessWebapp {
       await sleep(300);
     }
     this.kill();
-    return waitExit(this.proc, 3000);
+    await waitExit(this.proc, 3000);
+    // Download interrompido deixa o parcial com o guid como nome.
+    for (const [guid, d] of this.downloads) {
+      if (d.estado !== "baixando" || !this.downloadDir) continue;
+      fs.rmSync(path.join(this.downloadDir, guid), { force: true });
+      fs.rmSync(path.join(this.downloadDir, `${guid}.crdownload`), { force: true });
+    }
   }
 }
 

@@ -21,8 +21,10 @@ chrome-devtools-mcp 1.10 e AppServer 24.3 / release 12.1.2510.
    programa espera algo na tela. Parado, a tela congela; depois de
    `tds_debug_step continuar`, opere a tela de novo (MsgInfo, confirmações).
 5. Ao terminar, `tds_debug_stop` e `close_page` da aba `tds-<id>` (o retorno traz
-   `fecharAba`). Aba aberta mantém a thread viva no AppServer, já sem depurador, e cada
-   sessão esquecida deixa uma janela a mais.
+   `fecharAba`). O stop derruba a thread parada num breakpoint; a que roda ou espera um
+   diálogo continua no AppServer, já sem depurador, até a aba fechar. Cada sessão
+   esquecida deixa também uma janela a mais. A janela `about:blank` é a do próprio
+   chrome-devtools: fica aberta enquanto ele estiver ativo e não fecha por `close_page`.
 
 Erro de execução na tela: "SMARTCLIENT um problema foi encontrado na execução". O
 botão "Detalhes" traz mensagem, linha, pilha com as variáveis de cada nível e o

@@ -1348,6 +1348,10 @@ async function startDebug(args: {
   if (args.pastaDownloads && args.modo === "navegador") {
     throw new Error("pastaDownloads vale nos modos headless e job; no modo navegador o download é do chrome-devtools.");
   }
+  // Relativo seria resolvido contra a pasta do processo do MCP, que o agente não controla.
+  if (args.pastaDownloads && !path.isAbsolute(args.pastaDownloads)) {
+    throw new Error(`pastaDownloads precisa ser um caminho absoluto: ${args.pastaDownloads}`);
+  }
   const inicial = programaInicial(args.programa, args.argumentos ?? [], args.modulo);
   const { session } = await ensureClient();
   const active = session.required();
@@ -1376,7 +1380,7 @@ async function startDebug(args: {
     modo: args.modo,
     pastaFontes,
     pastaDownloads:
-      args.modo === "navegador" ? undefined : args.pastaDownloads ? path.resolve(args.pastaDownloads) : pastaDownloadsPadrao(),
+      args.modo === "navegador" ? undefined : args.pastaDownloads ?? pastaDownloadsPadrao(),
   });
   return { ...started, avisos };
 }

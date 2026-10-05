@@ -304,6 +304,7 @@ node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada c
 node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MCP
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
+node test/e2e-debug-bordas.mjs <srv> [amb]     # inatividade no navegador, download no modo job, parâmetros inválidos (depois do e2e-debug)
 node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
 node test/e2e-rpo-delete.mjs <srv> [amb]       # COMPILA e REMOVE do RPO dois fontes de teste; registro de temporários
 
