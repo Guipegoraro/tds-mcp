@@ -25,6 +25,7 @@ import {
 import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
 import { resolveDebugAdapterPath } from "./dap.js";
 import { resolveChromiumPath } from "./webapp.js";
+import { resolveWebAgentPath } from "./webagent.js";
 import { lintFiles } from "./linter.js";
 import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
@@ -1374,6 +1375,19 @@ async function sourceFreshness(files: string[]): Promise<string[]> {
   return avisos;
 }
 
+/** WebAgent pedido para a execução: o executável, ou por que segue sem ele. */
+function webAgentDaExecucao(pedido: boolean): { webAgentExe?: string; webAgentMotivo?: string } {
+  if (!pedido) return {};
+  const exe = resolveWebAgentPath(config.webAgentPath);
+  return exe
+    ? { webAgentExe: exe }
+    : {
+        webAgentMotivo:
+          "nenhum TOTVS WebAgent encontrado (instalado em %LOCALAPPDATA%\\Programs\\web-agent ou em " +
+          "webAgentPath do ~/.tds-mcp/config.json)",
+      };
+}
+
 async function startDebug(args: {
   programa: string;
   argumentos?: string[];
@@ -1382,6 +1396,7 @@ async function startDebug(args: {
   modo: DebugMode;
   pastaFontes?: string;
   pastaDownloads?: string;
+  webAgent?: boolean;
 }) {
   if (args.modulo && args.modo !== "navegador") {
     throw new Error(
@@ -1424,6 +1439,7 @@ async function startDebug(args: {
     pastaFontes,
     pastaDownloads:
       args.modo === "navegador" ? undefined : args.pastaDownloads ?? pastaDownloadsPadrao(),
+    ...webAgentDaExecucao(args.webAgent ?? args.modo === "navegador"),
   });
   return { ...started, avisos };
 }
@@ -1524,9 +1540,17 @@ server.registerTool(
             "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Só modos headless e job: no modo " +
             "navegador o download fica com o navegador do chrome-devtools"
         ),
+      webAgent: z
+        .boolean()
+        .optional()
+        .describe(
+          "Liga o TOTVS WebAgent (agente local que dá ao webapp o comportamento do SmartClient desktop: " +
+            "GetRemoteType() 1, arquivo local, impressão e PDF abrindo no visualizador da máquina). Padrão: " +
+            "ligado no modo navegador, desligado nos demais. O retorno traz `webAgent` (ativo, ou o motivo de seguir sem ele)"
+        ),
     },
   },
-  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes, pastaDownloads }) => {
+  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes, pastaDownloads, webAgent }) => {
     const mode = (modo ?? "headless") as DebugMode;
     const { session: s, breakpoints: bps, avisos } = await startDebug({
       programa,
@@ -1536,6 +1560,7 @@ server.registerTool(
       modo: mode,
       pastaFontes,
       pastaDownloads,
+      webAgent,
     });
     const wait = aguardarSeg ?? (mode === "navegador" ? 0 : 60);
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
@@ -1557,6 +1582,7 @@ server.registerTool(
           }
         : {}),
       breakpoints: bps,
+      ...(s.webAgentStatus ? { webAgent: s.webAgentStatus } : {}),
       ...(avisos.length ? { avisos } : {}),
       ...estado,
     });
@@ -1760,16 +1786,28 @@ server.registerTool(
           "Caminho absoluto da pasta onde gravar os arquivos que o programa manda ao navegador; padrão: " +
             "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h"
         ),
+      webAgent: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Liga o TOTVS WebAgent para rotina que depende dele (arquivo local, Excel, GetRemoteType() 1). Com ele, " +
+            "o PDF do FWMSPrinter abre no visualizador da máquina e não vem em arquivosBaixados. Se o agente " +
+            "não conectar, a execução segue sem ele e `webAgent.motivo` diz por quê"
+        ),
     },
   },
-  safe(async ({ programa, argumentos, timeoutSeg, pastaDownloads }) => {
+  safe(async ({ programa, argumentos, timeoutSeg, pastaDownloads, webAgent }) => {
     const t0 = Date.now();
-    const { session: s } = await startDebug({ programa, argumentos, modo: "headless", pastaDownloads });
+    const { session: s } = await startDebug({ programa, argumentos, modo: "headless", pastaDownloads, webAgent });
     try {
       const fim = await s.waitForStop(timeoutSeg ?? 60);
       const duracaoSeg = Math.round((Date.now() - t0) / 100) / 10;
       const baixados = s.browser?.arquivosBaixados ?? [];
-      const arquivos = baixados.length ? { arquivosBaixados: baixados } : {};
+      const arquivos = {
+        ...(baixados.length ? { arquivosBaixados: baixados } : {}),
+        ...(s.webAgentStatus ? { webAgent: s.webAgentStatus } : {}),
+      };
       if (fim.estado === "encerrado") {
         const erroLog = (fim.mensagens ?? []).find((m) => m.nivel === "ERROR");
         if (fim.erroDeExecucao || erroLog) {

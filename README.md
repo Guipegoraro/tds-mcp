@@ -162,9 +162,31 @@ pede login e confirma os diálogos de entrada do módulo; a rotina roda sem argu
 a função é o programa inicial e roda sem empresa aberta.
 
 Nos modos headless e job, o arquivo que o programa manda ao navegador (PDF do FWMSPrinter sem
-WebAgent, `CpyS2TW`) é gravado em `pastaDownloads` (padrão `%TEMP%	ds-mcpdownloads<data_hora>`,
+WebAgent, `CpyS2TW`) é gravado em `pastaDownloads` (padrão `%TEMP%\tds-mcp\downloads\<data_hora>`,
 guardada por 24 h) e listado em `arquivosBaixados`; nome repetido ganha sufixo `(2)` em vez de
 sobrescrever. O fim do programa espera até 2 s pelo início de um download.
+
+### TOTVS WebAgent
+
+O WebAgent é o agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop:
+`GetRemoteType()` 1, arquivo local, Excel, impressão e PDF abrindo no visualizador da máquina. O
+tds-mcp sobe uma instância própria do agente em cada execução, numa porta livre, sem mexer no
+agente que o usuário tiver aberto, e a encerra no fim.
+
+- Ligado por padrão no modo navegador (alguém acompanha a tela); desligado em `tds_run`, headless
+  e job, que seguem recebendo o arquivo gerado como download. `webAgent: true`/`false` muda numa execução.
+- O agente vem de `webAgentPath` no config (executável ou pasta), de `TDS_MCP_WEBAGENT` ou do
+  WebAgent instalado (`%LOCALAPPDATA%\Programs\web-agent`).
+- A versão do agente precisa ser a que o webapp do servidor aceita: a TOTVS amarra as versões de
+  WebApp e WebAgent (TDN "2. WebApp - WebAgent"), e o Protheus traz os instaladores em
+  `bin\web-agent`. O tds-mcp não escolhe pela versão: confere no log da instância se o handshake
+  fechou. Se o webapp recusar o agente ou não conectar, o headless recomeça sem agente; o modo
+  navegador avisa no `tds_debug_wait` para iniciar de novo com `webAgent: false`. O retorno traz
+  `webAgent` com `ativo` ou o motivo de seguir sem ele.
+- Agente que fala TLS com certificado não confiável no Windows não é usado, e o motivo traz o
+  comando `Import-Certificate` para confiar no certificado da TOTVS (o tds-mcp não instala certificado).
+- Com o agente, o PDF do FWMSPrinter é aberto no visualizador padrão da máquina e não vem em
+  `arquivosBaixados`.
 
 Limitações do depurador TOTVS que as tools contornam: `evaluate` só no frame do topo (outros
 frames via `tds_debug_variables`), sem `setVariable` (use `x := v`), pause não interrompe thread
@@ -286,8 +308,10 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
   navegador vale o triplo, porque o uso das telas pelo chrome-devtools não passa pelo tds-mcp)
 - `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
   encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`)
+- `webAgentPath` — WebAgent compatível com o webapp dos servidores, quando não for o instalado
+  (também `TDS_MCP_WEBAGENT`)
 
-Um caminho informado (`advplsPath`, `debugAdapterPath`, `chromiumPath` ou as variáveis de
+Um caminho informado (`advplsPath`, `debugAdapterPath`, `chromiumPath`, `webAgentPath` ou as variáveis de
 ambiente) que não existe é erro: o tds-mcp não troca por outro binário sem avisar. Campo com
 tipo errado ou JSON inválido no config é ignorado com aviso em `avisosConfig` do `tds_server_log`.
 
@@ -305,6 +329,7 @@ node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MC
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
 node test/e2e-debug-bordas.mjs <srv> [amb]     # inatividade no navegador, download no modo job, parâmetros inválidos (depois do e2e-debug)
+node test/e2e-webagent.mjs <srv> [amb]         # WebAgent no navegador e no headless, recusa e ausência do agente (depois do e2e-debug)
 node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
 node test/e2e-rpo-delete.mjs <srv> [amb]       # COMPILA e REMOVE do RPO dois fontes de teste; registro de temporários
 

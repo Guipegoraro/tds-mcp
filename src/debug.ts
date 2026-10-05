@@ -27,6 +27,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { DapClient, type DapEvent } from "./dap.js";
 import { HeadlessWebapp, type ArquivoBaixado, type WebappErrorCapture } from "./webapp.js";
+import { WebAgentInstance, comAgente } from "./webagent.js";
 import type { ActiveSession } from "./session.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -65,6 +66,10 @@ export interface StartOptions {
   pastaFontes: string;
   /** Pasta dos arquivos que o programa manda ao navegador headless. */
   pastaDownloads?: string;
+  /** web-agent.exe a ligar nesta execução; ausente = sem WebAgent. */
+  webAgentExe?: string;
+  /** Por que o WebAgent pedido não será usado (ex.: nenhum encontrado). */
+  webAgentMotivo?: string;
 }
 
 interface Snapshot {
@@ -100,6 +105,10 @@ export class DebugSession {
   readonly ambiente: string;
   readonly iniciadaEm = new Date();
   readonly pastaDownloads?: string;
+  /** Instância do WebAgent ligada a esta execução. */
+  agente?: WebAgentInstance;
+  /** Por que a execução segue sem WebAgent, quando ele foi pedido. */
+  webAgentMotivo?: string;
   url?: string;
   browser?: HeadlessWebapp;
   watches: string[] = [];
@@ -118,6 +127,7 @@ export class DebugSession {
     this.modo = opts.modo;
     this.programa = opts.descricao ?? opts.programa;
     this.pastaDownloads = opts.pastaDownloads;
+    this.webAgentMotivo = opts.webAgentMotivo;
     this.servidor = opts.active.def.name;
     this.ambiente = opts.active.environment;
   }
@@ -226,6 +236,25 @@ export class DebugSession {
     };
   }
 
+  /** Encerra a instância do WebAgent desta sessão e apaga a pasta temporária dela. */
+  encerrarAgente(): void {
+    const agente = this.agente;
+    if (!agente) return;
+    this.agente = undefined;
+    agente.kill();
+    try {
+      fs.rmSync(agente.pastaTemp, { recursive: true, force: true });
+    } catch {
+      /* visualizador de PDF aberto pelo agente ainda usa a pasta; a varredura remove depois */
+    }
+  }
+
+  /** Situação do WebAgent desta sessão, para os retornos das tools. */
+  get webAgentStatus(): { ativo: boolean; conectado?: boolean; motivo?: string } | undefined {
+    if (this.agente) return { ativo: true, conectado: this.agente.conectado };
+    return this.webAgentMotivo ? { ativo: false, motivo: this.webAgentMotivo } : undefined;
+  }
+
   /** Contexto isolado do chrome-devtools em que o agente abre a URL desta sessão. */
   get contextoIsolado(): string {
     return `tds-${/[?&]DEBUG=(\d+)/.exec(this.url ?? "")?.[1] ?? this.iniciadaEm.getTime()}`;
@@ -259,12 +288,28 @@ export class DebugSession {
           "(botões Detalhes/Fechar).",
       };
     }
+    // O webapp conecta no WebAgent antes do AppServer: agente recusado ou fora
+    // do ar segura a página e o programa não começa.
+    const agente = this.agente;
+    if (agente?.recusado) {
+      return {
+        conectado: false,
+        dica:
+          "O webapp recusou a versão do WebAgent (a tela mostra 'Acesso não autorizado ao WebAgent'): " +
+          "tds_debug_stop, close_page desta aba e inicie de novo com webAgent: false, ou configure " +
+          "webAgentPath com a versão compatível com o webapp do servidor.",
+      };
+    }
     return {
       conectado: false,
       dica:
         "Nenhum webapp se conectou a esta sessão: abra a url com new_page e isolatedContext (abrirCom). " +
         "Se a página mostrar o formulário 'Parâmetros Iniciais', ela perdeu os parâmetros da URL e o " +
-        "programa digitado ali roda fora do depurador: feche a aba e abra de novo com isolatedContext.",
+        "programa digitado ali roda fora do depurador: feche a aba e abra de novo com isolatedContext." +
+        (agente && !agente.conectado
+          ? " Se ela mostrar 'Falha ao conectar com o WebAgent', o agente não respondeu: tds_debug_stop, " +
+            "close_page e inicie de novo com webAgent: false."
+          : ""),
     };
   }
 
@@ -454,6 +499,7 @@ export class DebugSession {
     if (this.dap.alive) await this.dap.request("terminate", {}, 300);
     this.ended = true;
     await Promise.all([this.dap.close(), this.browser?.close()]);
+    this.encerrarAgente();
     // Pasta padrão sem nenhum download não fica para trás.
     const pasta = this.pastaDownloads;
     if (pasta && path.dirname(pasta) === path.join(os.tmpdir(), "tds-mcp", "downloads")) {
@@ -484,6 +530,8 @@ function removeStaleArtifacts(logDir: string): void {
       if (fs.statSync(alvo).mtimeMs >= limite) continue;
       if (/^debugAdapter-[\d-]+\.log$/.test(name)) {
         fs.rmSync(alvo, { force: true });
+      } else if (/^webagent-/.test(name)) {
+        fs.rmSync(alvo, { recursive: true, force: true });
       } else if (/^chromium-profile/.test(name)) {
         fs.rmSync(path.join(alvo, "lockfile"), { force: true });
         fs.rmSync(alvo, { recursive: true, force: true });
@@ -533,6 +581,7 @@ export class DebugManager {
       for (const s of [this.current, this.stopping, this.launching]) {
         s?.dap.kill();
         s?.browser?.kill();
+        s?.agente?.kill();
       }
     };
     process.on("exit", cleanup);
@@ -678,8 +727,33 @@ export class DebugManager {
       const logs = dap.logsSince(0).map((l) => l.mensagem).join(" | ");
       throw new Error(`O debugAdapter não informou a URL do webapp. ${logs}`.trim());
     }
+    const urlSemAgente = session.url;
+    if (opts.webAgentExe) {
+      const r = await WebAgentInstance.start(opts.webAgentExe, path.join(logDir, `webagent-${process.pid}-${++logSeq}`));
+      if ("agente" in r) {
+        session.agente = r.agente;
+        session.url = comAgente(session.url, r.agente.porta);
+      } else {
+        session.webAgentMotivo = r.motivo;
+      }
+    }
     if (opts.modo !== "navegador") {
       session.browser = await HeadlessWebapp.open(opts.chromiumPath!, session.url, logDir, opts.pastaDownloads);
+      // Agente recusado pelo webapp (versão incompatível) ou sem conexão deixa a
+      // tela em "Falha/Acesso não autorizado ao WebAgent" e o programa não
+      // começa: a página recomeça sem agente.
+      if (session.agente) {
+        const conexao = await session.agente.aguardarConexao(20000);
+        if (conexao !== "conectado") {
+          session.encerrarAgente();
+          session.webAgentMotivo =
+            conexao === "recusado"
+              ? "o webapp recusou esta versão do WebAgent (as versões de WebApp e WebAgent precisam ser compatíveis); configure webAgentPath com a versão compatível"
+              : "o webapp não conectou no WebAgent em 20 s";
+          session.url = urlSemAgente;
+          await session.browser.reabrirSemAgente(urlSemAgente);
+        }
+      }
     }
     // tds_debug_stop (ou o encerramento do MCP) durante a inicialização mata o
     // adaptador sem erro aqui: a sessão não pode virar a ativa; o catch do

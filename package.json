@@ -19,7 +19,7 @@
     "prepare": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "node test/verdict.test.mjs && node test/encoding.test.mjs && node test/advpls.test.mjs && node test/breakpointLines.test.mjs && node test/session.test.mjs && node test/trace.test.mjs && node test/config.test.mjs && node test/modulos.test.mjs && node test/temporarios.test.mjs && node test/linter.test.mjs",
+    "test": "node test/verdict.test.mjs && node test/encoding.test.mjs && node test/advpls.test.mjs && node test/breakpointLines.test.mjs && node test/session.test.mjs && node test/trace.test.mjs && node test/config.test.mjs && node test/modulos.test.mjs && node test/temporarios.test.mjs && node test/webagent.test.mjs && node test/linter.test.mjs",
     "test:smoke": "node test/smoke.mjs",
     "test:e2e": "node test/e2e-mcp.mjs"
   },

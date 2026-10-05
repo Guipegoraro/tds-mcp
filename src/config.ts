@@ -33,6 +33,8 @@ export interface TdsMcpConfig {
   webappUrls?: Record<string, string>;
   /** Minutos sem uso até uma sessão de depuração ser encerrada (padrão 10). */
   debugIdleMinutes?: number;
+  /** TOTVS WebAgent (web-agent.exe ou a pasta dele) compatível com o webapp dos servidores. */
+  webAgentPath?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".tds-mcp");
@@ -54,6 +56,7 @@ const FIELD_SCHEMAS: Record<keyof TdsMcpConfig, z.ZodTypeAny> = {
   chromiumPath: z.string().min(1),
   webappUrls: z.record(z.string().min(1)),
   debugIdleMinutes: z.number().positive(),
+  webAgentPath: z.string().min(1),
 };
 
 /** Problemas encontrados ao ler o config.json (mostrados em tds_server_log). */

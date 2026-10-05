@@ -277,7 +277,7 @@ try {
   const mod = await call("tds_debug_start", { programa: "u_zTstDbg1", modulo: "SIGAEST", modo: "navegador" });
   check(
     "modulo: url pelo SIGABPM com código do módulo e a rotina",
-    /&P=SIGABPM&M=1&A=04&A=u_zTstDbg1$/i.test(mod.data?.abrirCom?.url ?? "") && /módulo 04/.test(mod.data?.sessao?.programa ?? ""),
+    /&P=SIGABPM&M=1&A=04&A=u_zTstDbg1(&AGENT-PORT=\d+)?$/i.test(mod.data?.abrirCom?.url ?? "") && /módulo 04/.test(mod.data?.sessao?.programa ?? ""),
     short(mod.data?.abrirCom?.url ?? mod.data)
   );
   await call("tds_debug_stop");
@@ -328,7 +328,8 @@ try {
       }
       return { isError: !!r.isError, data: parsed };
     };
-    await callOutro("tds_use_server", { servidor: serverName, ambiente: environment, ...credenciais });
+    const conOutro = await callOutro("tds_use_server", { servidor: serverName, ambiente: environment, ...credenciais });
+    check("segundo processo do tds-mcp conecta", conOutro.data?.conectado === true, short(conOutro.data));
     const [p1, p2] = await Promise.all([
       call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),
       callOutro("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 }),

@@ -57,6 +57,9 @@ com o caminho local, nos modos headless e job.
      como **temporário** (REFERENCE.md, "Wrapper de teste"). Empresa, filial e respostas
      de pergunta (`MV_PARxx`) vêm do usuário; sem elas, pergunte. Função que já recebe
      empresa e filial e abre o próprio ambiente roda direto, com elas em `argumentos`.
+   - Rotina que depende do TOTVS WebAgent (arquivo na máquina do usuário, Excel,
+     `GetRemoteType()` 1): o modo navegador já o liga; nos outros, `webAgent: true`
+     (REFERENCE.md, "TOTVS WebAgent").
    - O caminho HTTP de um REST, ou a thread exata que o StartJob cria: modo `job`, só
      quando o usuário confirmar que o AppServer é exclusivo dele (nenhum outro
      desenvolvedor ou usuário conectado; "é o de desenvolvimento" não basta) e quem

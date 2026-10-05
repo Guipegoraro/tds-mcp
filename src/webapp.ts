@@ -234,6 +234,18 @@ export class HeadlessWebapp {
     }
   }
 
+  /**
+   * Recarrega o webapp sem o WebAgent: o webapp guarda a porta do agente no
+   * localStorage ao recebê-la pela URL, e a usaria de novo.
+   */
+  async reabrirSemAgente(url: string): Promise<void> {
+    await this.send("Runtime.evaluate", {
+      expression:
+        "for (const k of Object.keys(localStorage)) if (/agentport/i.test(k)) localStorage.removeItem(k)",
+    });
+    await this.send("Page.navigate", { url });
+  }
+
   /** Arquivos recebidos pelo navegador nesta execução. */
   get arquivosBaixados(): ArquivoBaixado[] {
     return [...this.downloads.values()].map(({ arquivo, bytes, estado }) => ({

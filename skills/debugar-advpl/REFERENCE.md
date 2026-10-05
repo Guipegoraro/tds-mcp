@@ -42,6 +42,19 @@ arquivo). Para receber o arquivo, rode um wrapper (seção "Wrapper de teste") c
 ou no modo headless. Se o usuário quer ver a tela do `Pergunte` e também o arquivo,
 são duas execuções: uma no navegador com `modulo`, outra com o wrapper.
 
+## TOTVS WebAgent
+
+O agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop
+(`GetRemoteType()` 1, arquivo local, Excel, impressão, PDF abrindo no visualizador da
+máquina). O tds-mcp liga uma instância própria por execução: por padrão no modo navegador
+(o `abrirCom.url` já traz `AGENT-PORT`), e em `tds_run`/headless/job só com
+`webAgent: true` — use quando a rotina depender dele. O retorno traz `webAgent`: `ativo`,
+ou `motivo` de seguir sem ele (nenhum agente na máquina, versão recusada pelo webapp,
+certificado não confiável com o comando para confiar). No headless, agente recusado faz a
+página recomeçar sem ele; no navegador, o `tds_debug_wait` avisa e você inicia de novo com
+`webAgent: false`. Com o agente, o PDF do FWMSPrinter abre no visualizador da máquina e não
+vem em `arquivosBaixados`; para receber o arquivo, rode sem agente.
+
 ## Rotina dentro do módulo (`modulo`)
 
 `tds_debug_start` com `programa: "u_zRotina"`, `modulo: "04"` e `modo: "navegador"`. A
