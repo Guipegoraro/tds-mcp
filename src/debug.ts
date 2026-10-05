@@ -79,6 +79,7 @@ interface Snapshot {
   dica?: string;
   tela?: string;
   botoes?: string[];
+  fecharAba?: string;
 }
 
 /** Valor de variável no formato curto "<tipo> <valor>", com "(+)" quando expansível. */
@@ -180,7 +181,7 @@ export class DebugSession {
    */
   async waitForStop(timeoutSeg: number): Promise<Snapshot> {
     this.touch();
-    if (this.ended) return { estado: "encerrado", mensagens: this.takeLogs() };
+    if (this.ended) return { estado: "encerrado", mensagens: this.takeLogs(), ...this.fecharAba() };
     // Já parado: devolve o estado atual em vez de esperar outra parada.
     if (this.threadId !== undefined) return this.snapshot();
     const deadline = Date.now() + timeoutSeg * 1000;
@@ -211,6 +212,25 @@ export class DebugSession {
     return {
       ...(tela ? { tela: tela.length > 2000 ? tela.slice(0, 2000) + "…" : tela } : {}),
       ...(botoes.length ? { botoes } : {}),
+    };
+  }
+
+  /** Contexto isolado do chrome-devtools em que o agente abre a URL desta sessão. */
+  get contextoIsolado(): string {
+    return `tds-${/[?&]DEBUG=(\d+)/.exec(this.url ?? "")?.[1] ?? this.iniciadaEm.getTime()}`;
+  }
+
+  /**
+   * No modo navegador a aba é do chrome-devtools e o tds-mcp não a fecha:
+   * enquanto ela fica aberta, a thread continua no AppServer (sem depurador)
+   * e cada sessão deixa uma janela a mais.
+   */
+  fecharAba(): { fecharAba?: string } {
+    if (this.modo !== "navegador") return {};
+    return {
+      fecharAba:
+        `Feche a aba desta sessão no chrome-devtools: list_pages, ache a aba com isolatedContext=${this.contextoIsolado} ` +
+        "e chame close_page com o pageId dela. A thread no AppServer só termina quando a página sai.",
     };
   }
 
@@ -245,6 +265,7 @@ export class DebugSession {
         estado: "encerrado",
         mensagens: this.takeLogs(),
         ...(this.errorCapture ? { erroDeExecucao: this.errorCapture } : {}),
+        ...this.fecharAba(),
       };
     }
     this.threadId = ev.body?.threadId ?? 1;
@@ -287,7 +308,9 @@ export class DebugSession {
   async snapshot(motivo?: string): Promise<Snapshot> {
     this.touch();
     if (this.threadId === undefined) {
-      return { estado: this.encerrada ? "encerrado" : "executando", mensagens: this.takeLogs() };
+      return this.encerrada
+        ? { estado: "encerrado", mensagens: this.takeLogs(), ...this.fecharAba() }
+        : { estado: "executando", mensagens: this.takeLogs() };
     }
     const frames = await this.frames();
     const top = frames[0];
@@ -458,6 +481,8 @@ export class DebugManager {
   private stopping?: DebugSession;
   /** Sessão em inicialização: o adaptador já existe, mas ainda não é `current`. */
   private launching?: DebugSession;
+  /** Instrução de fechar a aba de uma sessão do modo navegador encerrada por inatividade. */
+  private abaPendente?: string;
 
   constructor(private idleMinutes: number) {
     // Último recurso na saída do processo: só dá para mandar o kill.
@@ -470,8 +495,22 @@ export class DebugManager {
     process.on("exit", cleanup);
   }
 
+  /** Instrução de fechar aba de sessão do modo navegador encerrada por inatividade (uma vez só). */
+  takeAbaPendente(): string | undefined {
+    const aba = this.abaPendente;
+    this.abaPendente = undefined;
+    return aba;
+  }
+
   require(): DebugSession {
-    if (!this.current) throw new Error("Nenhuma sessão de depuração ativa. Use tds_debug_start.");
+    if (!this.current) {
+      const aba = this.takeAbaPendente();
+      throw new Error(
+        aba
+          ? `A sessão de depuração encerrou por inatividade. ${aba}`
+          : "Nenhuma sessão de depuração ativa. Use tds_debug_start."
+      );
+    }
     return this.current;
   }
 
@@ -493,7 +532,7 @@ export class DebugManager {
           `Encerre com tds_debug_stop ou aguarde a execução terminar.`
       );
     }
-    this.starting = { programa: opts.programa, servidor: opts.active.def.name, desde: new Date() };
+    this.starting = { programa: opts.descricao ?? opts.programa, servidor: opts.active.def.name, desde: new Date() };
     try {
       return await this.launchSession(opts);
     } finally {
@@ -632,7 +671,10 @@ export class DebugManager {
       // No modo navegador o uso das telas pelo chrome-devtools não passa pelo
       // tds-mcp e não conta como atividade: o prazo é o triplo.
       const limite = this.idleMinutes * (s.modo === "navegador" ? 3 : 1) * 60000;
-      if (Date.now() - s.lastActivity > limite) void this.stop();
+      if (Date.now() - s.lastActivity > limite) {
+        this.abaPendente = s.fecharAba().fecharAba;
+        void this.stop();
+      }
     }, 30000);
     this.idleTimer.unref();
   }

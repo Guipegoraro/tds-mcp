@@ -233,7 +233,12 @@ try {
       short(parou.data?.local ?? parou.data)
     );
   } finally {
-    await call("tds_debug_stop");
+    const fim = await call("tds_debug_stop");
+    check(
+      "debug_stop navegador: devolve fecharAba com o contexto isolado",
+      fim.data?.encerrada === true && (fim.data?.fecharAba ?? "").includes(abrir.isolatedContext),
+      short(fim.data)
+    );
     await pagina.close();
     fs.rmSync(baseNav, { recursive: true, force: true });
   }

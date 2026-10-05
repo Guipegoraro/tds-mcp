@@ -1322,7 +1322,7 @@ server.registerTool(
     });
     const wait = aguardarSeg ?? (mode === "navegador" ? 0 : 60);
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
-    const contexto = `tds-${/[?&]DEBUG=(\d+)/.exec(s.url ?? "")?.[1] ?? Date.now()}`;
+    const contexto = s.contextoIsolado;
     return jsonResult({
       sessao: { programa: s.programa, servidor: s.servidor, ambiente: s.ambiente, modo: s.modo },
       ...(mode === "navegador"
@@ -1335,7 +1335,8 @@ server.registerTool(
                   "o aviso de ambiente e diálogos do módulo (ex.: Moedas): confirme cada um; a carga do módulo " +
                   "pode levar minutos. "
                 : "") +
-              "Acompanhe com tds_debug_wait (até 100 s por chamada) e veja a tela com take_snapshot.",
+              "Acompanhe com tds_debug_wait (até 100 s por chamada) e veja a tela com take_snapshot. " +
+              "Ao terminar: tds_debug_stop e close_page desta aba.",
           }
         : {}),
       breakpoints: bps,
@@ -1478,10 +1479,16 @@ server.registerTool(
     description:
       "Encerra a sessão de depuração: libera a thread no AppServer (uma thread parada em " +
       "breakpoint fica presa até o depurador sair) e fecha o navegador headless. Sempre chame " +
-      "ao terminar. Sessões sem uso também encerram sozinhas após o tempo de inatividade.",
+      "ao terminar. Sessões sem uso também encerram sozinhas após o tempo de inatividade. No modo " +
+      "navegador a aba é do chrome-devtools: o retorno traz `fecharAba`; feche-a com close_page, " +
+      "senão a thread continua no AppServer e a janela fica aberta.",
     inputSchema: {},
   },
-  safe(async () => jsonResult({ encerrada: await debugManager.stop() }))
+  safe(async () => {
+    const aba = debugManager.current?.fecharAba().fecharAba ?? debugManager.takeAbaPendente();
+    const encerrada = await debugManager.stop();
+    return jsonResult({ encerrada, ...(aba ? { fecharAba: aba } : {}) });
+  })
 );
 
 server.registerTool(
