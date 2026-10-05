@@ -1546,7 +1546,8 @@ server.registerTool(
         .describe(
           "Liga o TOTVS WebAgent (agente local que dá ao webapp o comportamento do SmartClient desktop: " +
             "GetRemoteType() 1, arquivo local, impressão e PDF abrindo no visualizador da máquina). Padrão: " +
-            "ligado no modo navegador, desligado nos demais. O retorno traz `webAgent` (ativo, ou o motivo de seguir sem ele)"
+            "ligado no modo navegador, desligado nos demais. O retorno traz `webAgent` (ativo, ou o motivo de seguir sem ele); " +
+            "com ativo false o programa roda sem agente e o caminho que depende dele não é testado"
         ),
     },
   },
@@ -1728,6 +1729,8 @@ server.registerTool(
       "headless. Sempre chame ao terminar, inclusive depois de erro. Sessão sem uso encerra " +
       "sozinha depois de debugIdleMinutes de ~/.tds-mcp/config.json (padrão 10 min; no modo " +
       "navegador, o triplo). " +
+      "Encerra também a instância do WebAgent da sessão (visualizador de PDF ou Excel que ela " +
+      "abriu continuam abertos: são programas do usuário). " +
       "Devolve `encerrada` (false = não havia sessão ativa). No modo navegador a aba é do " +
       "chrome-devtools e vem `fecharAba`: texto com o nome do contexto isolado (tds-<id>, o " +
       "mesmo de abrirCom); ache a aba com list_pages (ela mostra isolatedContext=tds-<id> e a " +
@@ -1793,7 +1796,8 @@ server.registerTool(
         .describe(
           "Liga o TOTVS WebAgent para rotina que depende dele (arquivo local, Excel, GetRemoteType() 1). Com ele, " +
             "o PDF do FWMSPrinter abre no visualizador da máquina e não vem em arquivosBaixados. Se o agente " +
-            "não conectar, a execução segue sem ele e `webAgent.motivo` diz por quê"
+            "não conectar, a execução segue sem ele e `webAgent.motivo` diz por quê: aí o caminho que depende do " +
+            "agente não foi testado, mesmo com resultado concluido"
         ),
     },
   },

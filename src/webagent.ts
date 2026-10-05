@@ -121,7 +121,8 @@ export class WebAgentInstance {
       return {
         motivo:
           "o certificado do WebAgent não é confiável neste Windows, e o navegador recusaria a conexão. Para " +
-          `confiar (uma vez, por usuário): Import-Certificate -FilePath "${ca}" -CertStoreLocation Cert:\\CurrentUser\\Root`,
+          `confiar (uma vez, por usuário; altera os certificados confiáveis do Windows, rode só com autorização ` +
+          `do usuário): Import-Certificate -FilePath "${ca}" -CertStoreLocation Cert:\\CurrentUser\\Root`,
       };
     }
     return { agente };

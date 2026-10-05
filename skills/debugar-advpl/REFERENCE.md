@@ -50,10 +50,26 @@ máquina). O tds-mcp liga uma instância própria por execução: por padrão no
 (o `abrirCom.url` já traz `AGENT-PORT`), e em `tds_run`/headless/job só com
 `webAgent: true` — use quando a rotina depender dele. O retorno traz `webAgent`: `ativo`,
 ou `motivo` de seguir sem ele (nenhum agente na máquina, versão recusada pelo webapp,
-certificado não confiável com o comando para confiar). No headless, agente recusado faz a
-página recomeçar sem ele; no navegador, o `tds_debug_wait` avisa e você inicia de novo com
-`webAgent: false`. Com o agente, o PDF do FWMSPrinter abre no visualizador da máquina e não
-vem em `arquivosBaixados`; para receber o arquivo, rode sem agente.
+certificado não confiável).
+
+- **Seguiu sem agente:** com `webAgent.ativo: false`, o programa rodou sem o WebAgent, e o
+  caminho que depende dele (arquivo local, Excel, `GetRemoteType()` 1) não foi exercitado.
+  Diga isso no relato; não dê esse caminho como testado.
+- **Certificado não confiável:** o `motivo` traz o comando `Import-Certificate`. Ele altera os
+  certificados confiáveis do Windows: mostre ao usuário e só rode com autorização dele;
+  depois, execute de novo.
+- **Agente recusado no navegador:** o `tds_debug_wait` volta `executando` com
+  `conectado: false` e o aviso no campo `dica` (a tela mostra "Acesso não autorizado ao
+  WebAgent"). Faça `tds_debug_stop`, `close_page` da aba e inicie de novo com
+  `webAgent: false`. No headless, a página recomeça sem agente sozinha.
+- **Arquivo gerado com o agente:** o PDF do FWMSPrinter abre no visualizador da máquina e
+  não vem em `arquivosBaixados`. Arquivo que a rotina grava pelo agente vai para o caminho
+  que ela usa — `GetTempPath()` com o agente pode ser uma pasta do webapp no servidor, não a
+  máquina. `concluido` não prova que o arquivo existe: confira na tela ou peça ao usuário
+  para conferir. Para receber o arquivo, rode sem agente.
+- **Encerramento:** o `tds_debug_stop` e o fim do `tds_run` encerram a instância do agente.
+  Visualizador de PDF ou Excel que o agente abriu são programas do usuário e continuam
+  abertos.
 
 ## Rotina dentro do módulo (`modulo`)
 
