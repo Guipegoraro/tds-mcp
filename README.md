@@ -78,10 +78,12 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 |---|---|---|
 | `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
 | `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada | sessão |
-| `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`) | **grava no RPO** |
+| `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `temporario` registra o fonte para remoção posterior | **grava no RPO** |
 | `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
 | `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`) | nenhum |
 | `tds_rpo_objects` | Lista objetos do RPO (filtro + datas) | read-only |
+| `tds_rpo_temporarios` | Lista os fontes compilados com `temporario` e se ainda estão no RPO | read-only |
+| `tds_rpo_delete` | Remove do RPO os temporários registrados; outro fonte só com `foraDoRegistro` a pedido do usuário; objeto oficial TOTVS sempre recusado | **remove do RPO** |
 | `tds_rpo_functions` | Lista funções do RPO (fonte + linha) | read-only |
 | `tds_rpo_info` | Versão do RPO + histórico de patches aplicados | read-only |
 | `tds_patch_generate` | Gera PTM com manifesto e rastreabilidade | read-only no RPO |
@@ -105,7 +107,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 
 ### Segurança operacional (leia antes de usar em cliente)
 
-`tds_compile`, `tds_patch_generate` e `tds_patch_apply` **alteram o RPO de um servidor real**, e as
+`tds_compile`, `tds_patch_generate`, `tds_patch_apply` e `tds_rpo_delete` **alteram o RPO de um servidor real**, e as
 tools de ação do monitor (`tds_monitor_*`) **afetam usuários conectados**, e
 `tds_run`, `tds_debug_start` e `tds_debug_evaluate` **executam código no servidor**.
 Recomendação forte: configure seu cliente MCP para **sempre pedir confirmação** nelas.
@@ -118,6 +120,7 @@ No Claude Code, em `~/.claude/settings.json`:
       "mcp__tds__tds_compile",
       "mcp__tds__tds_patch_generate",
       "mcp__tds__tds_patch_apply",
+      "mcp__tds__tds_rpo_delete",
       "mcp__tds__tds_monitor_send_message",
       "mcp__tds__tds_monitor_kill_user",
       "mcp__tds__tds_monitor_app_kill_user",
@@ -297,6 +300,7 @@ node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MC
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
 node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
+node test/e2e-rpo-delete.mjs <srv> [amb]       # COMPILA e REMOVE do RPO dois fontes de teste; registro de temporários
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO

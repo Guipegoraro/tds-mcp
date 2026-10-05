@@ -28,6 +28,7 @@ import { lintFiles } from "./linter.js";
 import { DebugManager, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
+import { TEMPORARIOS_FILE, loadTemporarios, nomeNoRpo, registrarCompilacao, removerTemporarios, temporariosDe } from "./temporarios.js";
 import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding.js";
 import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
@@ -334,14 +335,22 @@ server.registerTool(
       "atualizado no RPO — é sucesso, mas NADA foi gravado; confira `ignorados` e o campo " +
       "`aviso` antes de afirmar que compilou. Fontes precisam estar em CP1252: arquivos em " +
       "UTF-8 são recusados antes do envio (o compilador Protheus gravaria caracteres " +
-      "corrompidos no RPO). Aceita fontes e recursos (.tres, .png, imagens, layouts).",
+      "corrompidos no RPO). Aceita fontes e recursos (.tres, .png, imagens, layouts). " +
+      "temporario=true para fonte que não faz parte da entrega (wrapper de teste, fonte de " +
+      "experimento): ele entra no registro de temporários e pode ser removido depois com " +
+      "tds_rpo_delete. Compilar o mesmo fonte sem a marca tira ele do registro.",
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
       aceitarMisto: ACEITAR_MISTO_SCHEMA,
+      temporario: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Fonte temporário (teste/wrapper): registra para remoção posterior com tds_rpo_delete"),
     },
   },
-  safe(async ({ arquivos, recompile, aceitarMisto }) => {
+  safe(async ({ arquivos, recompile, aceitarMisto, temporario }) => {
     const options = defaultCompileOptions();
     options.recompile = recompile ?? false;
     const { active, expanded, verdict, logDaOperacao, mistoAceito } = await runCompilation(
@@ -349,9 +358,22 @@ server.registerTool(
       options,
       aceitarMisto ?? false
     );
+    // Só o que foi gravado no RPO muda o registro: build revertido não grava nada.
+    let avisoRegistro: string | undefined;
+    if (verdict.sucesso) {
+      try {
+        registrarCompilacao(active.def.name, active.environment, expanded, temporario ?? false);
+      } catch (err) {
+        avisoRegistro = `Compilou, mas o registro de temporários (${TEMPORARIOS_FILE}) não foi atualizado: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+      }
+    }
     const payload = {
       servidor: active.def.name,
       ambiente: active.environment,
+      ...(temporario && verdict.sucesso && !avisoRegistro ? { registradosComoTemporarios: expanded.map(nomeNoRpo) } : {}),
+      ...(avisoRegistro ? { avisoRegistro } : {}),
       ...(mistoAceito.length ? { encodingMistoAceito: mistoAceito } : {}),
       totalFontes: expanded.length,
       sucesso: verdict.sucesso,
@@ -515,6 +537,122 @@ server.registerTool(
         "mtime do arquivo-fonte no momento da compilação; igual ao disco (±2s) = RPO atualizado",
       objetos: filtered.slice(0, max).map((o) => ({ fonte: o.source, dataFonte: o.date })),
     });
+  })
+);
+
+server.registerTool(
+  "tds_rpo_temporarios",
+  {
+    title: "Listar fontes temporários do RPO",
+    description:
+      "Lista os fontes que o tds-mcp compilou como temporários (tds_compile temporario=true: " +
+      "wrappers e fontes de teste) no servidor/ambiente conectado, e se ainda estão no RPO. São os " +
+      "que tds_rpo_delete remove sem liberação extra. todos=true lista de todos os servidores, sem " +
+      `conferir o RPO. Registro em ${TEMPORARIOS_FILE}.`,
+    inputSchema: {
+      todos: z.boolean().optional().default(false).describe("Todos os servidores e ambientes registrados"),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  safe(async ({ todos }) => {
+    if (todos) return jsonResult({ registro: TEMPORARIOS_FILE, temporarios: loadTemporarios() });
+    const { client, session } = await ensureClient();
+    const active = session.required();
+    const registrados = temporariosDe(active.def.name, active.environment);
+    const noRpo = new Set(
+      (await client.inspectorObjects(active.connectionToken, active.environment, true)).map((o) => o.source.toUpperCase())
+    );
+    return jsonResult({
+      servidor: active.def.name,
+      ambiente: active.environment,
+      registro: TEMPORARIOS_FILE,
+      temporarios: registrados.map((t) => ({ ...t, noRpo: noRpo.has(t.fonte) })),
+    });
+  })
+);
+
+server.registerTool(
+  "tds_rpo_delete",
+  {
+    title: "Remover fontes temporários do RPO",
+    description:
+      "Remove fontes/recursos do RPO do servidor/ambiente conectado. Por padrão só aceita os " +
+      "registrados como temporários (veja tds_rpo_temporarios) e recusa os demais sem apagar nada. " +
+      "foraDoRegistro=true libera fonte fora do registro: use SOMENTE quando o usuário pedir " +
+      "explicitamente a remoção daquele fonte. Objeto oficial TOTVS (status de produção no RPO) é " +
+      "sempre recusado, e a remoção vai sem chave de compilação. Bloqueada durante uma depuração. Confere antes " +
+      "que todos os nomes estão no RPO e, depois, que saíram. Pergunte ao usuário antes de remover.",
+    inputSchema: {
+      fontes: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("Nomes como no RPO (ex.: ZTSTR02.PRW) ou caminhos dos arquivos"),
+      foraDoRegistro: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("Libera fonte que não é temporário registrado; só com pedido explícito do usuário"),
+    },
+    annotations: { destructiveHint: true },
+  },
+  safe(async ({ fontes, foraDoRegistro }) => {
+    if (debugManager.current && !debugManager.current.encerrada) {
+      throw new Error("Há uma sessão de depuração ativa: encerre com tds_debug_stop antes de remover fontes do RPO.");
+    }
+    const { client, session } = await ensureClient();
+    const active = session.required();
+    const nomes = [...new Set(fontes.map(nomeNoRpo))];
+    const registrados = new Set(temporariosDe(active.def.name, active.environment).map((t) => t.fonte));
+    const fora = nomes.filter((n) => !registrados.has(n));
+    if (fora.length && !foraDoRegistro) {
+      throw new Error(
+        `Não são temporários registrados em ${active.def.name}/${active.environment}: ${fora.join(", ")}. ` +
+          "Nada foi removido. Só remova fonte fora do registro se o usuário pedir explicitamente (foraDoRegistro=true)."
+      );
+    }
+    // Status do objeto no inspetor (TDN "Application Server - Command Line"): 1º caractere
+    // N sem status, P produção (objeto oficial TOTVS), D desenvolvimento.
+    const noRpo = async () =>
+      new Map(
+        (await client.inspectorObjects(active.connectionToken, active.environment, true)).map((o) => [
+          o.source.toUpperCase(),
+          o.source_status.toUpperCase(),
+        ])
+      );
+    const antes = await noRpo();
+    // Um nome ausente aborta a remoção inteira no AppServer ("End build aborted.").
+    const ausentes = nomes.filter((n) => !antes.has(n));
+    if (ausentes.length) {
+      throw new Error(`Não estão no RPO de ${active.environment}: ${ausentes.join(", ")}. Nada foi removido.`);
+    }
+    const oficiais = nomes.filter((n) => antes.get(n) === "P");
+    if (oficiais.length) {
+      throw new Error(
+        `Objetos oficiais TOTVS (status de produção no RPO): ${oficiais.join(", ")}. O tds-mcp nunca os remove. Nada foi removido.`
+      );
+    }
+    const logMark = client.logCount;
+    let returnCode: number | undefined;
+    let falha: string | undefined;
+    try {
+      returnCode = (await client.deletePrograms(active.connectionToken, active.environment, nomes))?.returnCode;
+    } catch (err) {
+      falha = err instanceof Error ? err.message : String(err);
+    }
+    const depois = await noRpo();
+    const removidos = nomes.filter((n) => !depois.has(n));
+    const naoRemovidos = nomes.filter((n) => depois.has(n));
+    removerTemporarios(active.def.name, active.environment, removidos);
+    const payload = {
+      servidor: active.def.name,
+      ambiente: active.environment,
+      removidos,
+      ...(naoRemovidos.length ? { naoRemovidos } : {}),
+      ...(returnCode !== undefined ? { returnCode } : {}),
+      ...(falha ? { falha } : {}),
+      ...(naoRemovidos.length ? { logDoServidor: client.logSince(logMark) } : {}),
+    };
+    return naoRemovidos.length ? jsonFailure(payload) : jsonResult(payload);
   })
 );
 

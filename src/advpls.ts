@@ -530,6 +530,18 @@ export class AdvplsClient {
     });
   }
 
+  /**
+   * Remove fontes/recursos do RPO, pelo nome como o RPO registra (ex.:
+   * "ZTSTR02.PRW"). Vai sem token de autorização: fonte padrão ou compilado
+   * com token é recusado pelo próprio AppServer. Nome que não está no RPO
+   * aborta a operação inteira ("End build aborted.").
+   */
+  deletePrograms(connectionToken: string, environment: string, programs: string[]): Promise<{ returnCode?: number }> {
+    return this.request("$totvsserver/deletePrograms", {
+      deleteProgramsInfo: { connectionToken, environment, programs },
+    });
+  }
+
   rpoInfo(connectionToken: string, environment: string): Promise<RpoInfoResult> {
     return this.request("$totvsserver/rpoInfo", {
       rpoInfo: { connectionToken, environment },
