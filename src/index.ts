@@ -347,7 +347,9 @@ server.registerTool(
         .boolean()
         .optional()
         .default(false)
-        .describe("Fonte temporário (teste/wrapper): registra para remoção posterior com tds_rpo_delete"),
+        .describe(
+          "Fonte temporário (teste/wrapper): registra para remoção posterior com tds_rpo_delete, também quando vem SKIPPED (já estava no RPO)"
+        ),
     },
   },
   safe(async ({ arquivos, recompile, aceitarMisto, temporario }) => {
@@ -547,8 +549,12 @@ server.registerTool(
     description:
       "Lista os fontes que o tds-mcp compilou como temporários (tds_compile temporario=true: " +
       "wrappers e fontes de teste) no servidor/ambiente conectado, e se ainda estão no RPO. São os " +
-      "que tds_rpo_delete remove sem liberação extra. todos=true lista de todos os servidores, sem " +
-      `conferir o RPO. Registro em ${TEMPORARIOS_FILE}.`,
+      "que tds_rpo_delete remove sem liberação extra. Cada item: servidor, ambiente, fonte (nome " +
+      "como o RPO registra, ex.: ZTSTR02.PRW), arquivo (caminho local compilado), compiladoEm e " +
+      "noRpo (se ainda está no RPO). todos=true lista de todos os servidores, sem conferir o RPO " +
+      "(sem noRpo). O registro é desta máquina (~/.claude/tds-mcp/temporarios.json): fonte " +
+      "compilado por um colega ou antes do registro não aparece aqui e, para o tds_rpo_delete, " +
+      "está fora do registro.",
     inputSchema: {
       todos: z.boolean().optional().default(false).describe("Todos os servidores e ambientes registrados"),
     },
@@ -577,11 +583,15 @@ server.registerTool(
     title: "Remover fontes temporários do RPO",
     description:
       "Remove fontes/recursos do RPO do servidor/ambiente conectado. Por padrão só aceita os " +
-      "registrados como temporários (veja tds_rpo_temporarios) e recusa os demais sem apagar nada. " +
+      "registrados como temporários nesta máquina (veja tds_rpo_temporarios) e recusa os demais " +
+      "sem apagar nada. " +
       "foraDoRegistro=true libera fonte fora do registro: use SOMENTE quando o usuário pedir " +
       "explicitamente a remoção daquele fonte. Objeto oficial TOTVS (status de produção no RPO) é " +
-      "sempre recusado, e a remoção vai sem chave de compilação. Bloqueada durante uma depuração. Confere antes " +
-      "que todos os nomes estão no RPO e, depois, que saíram. Pergunte ao usuário antes de remover.",
+      "sempre recusado. Recusada enquanto houver sessão de depuração ativa (tds_run não deixa " +
+      "sessão). Confere antes que todos os nomes estão no RPO (um ausente recusa a lista inteira) " +
+      "e, depois, que saíram: retorno com `removidos` e, se algo ficou, `naoRemovidos` e " +
+      "`logDoServidor`. Antes de remover, pergunte ao usuário citando fontes, servidor e ambiente, " +
+      "mesmo quando ele pediu a remoção: a tool age no servidor conectado.",
     inputSchema: {
       fontes: z
         .array(z.string().min(1))
@@ -1412,31 +1422,38 @@ server.registerTool(
     title: "Depurar: iniciar sessão",
     description:
       "Inicia a depuração de um programa no servidor/ambiente conectado (tds_use_server), pelo " +
-      "debugAdapter da TOTVS e o SmartClient HTML (webapp). Pergunte ao usuário antes de depurar " +
+      "depurador da TOTVS e o SmartClient HTML (webapp). Pergunte ao usuário antes de depurar " +
       "num servidor: o programa roda de verdade e, parado num breakpoint, segura a thread. " +
-      "modo 'headless': o tds-mcp abre o programa num navegador invisível — para rotinas sem " +
-      "tela. modo 'navegador': devolve `abrirCom` ({url, isolatedContext}); abra com new_page do " +
-      "chrome-devtools passando os dois — sem o contexto isolado, o perfil do navegador guarda o " +
-      "último programa e o WebAgent, e o webapp descarta os parâmetros da URL. Opere as telas no " +
-      "chrome-devtools e acompanhe com tds_debug_wait. modulo (só no modo navegador): roda a rotina " +
-      "dentro do módulo, como o usuário no menu (empresa, filial, data base, MV_ e variáveis do " +
-      "módulo); a tela pede login e confirma diálogos do módulo antes de a rotina começar. Sem " +
-      "modulo, a função é o programa inicial e roda sem empresa aberta; um wrapper com RpcSetEnv " +
-      "abre o ambiente em modo automático (Pergunte não mostra tela, data com ano de 2 dígitos). modo 'job': também captura threads novas do ambiente " +
-      "(StartJob, REST) — mas pode capturar jobs alheios do servidor; use só em AppServer de " +
-      "desenvolvimento dedicado. Com aguardarSeg > 0 espera a primeira parada e já devolve o " +
-      "estado (local, pilha, variáveis Local/Private/Static). Uma sessão por vez; encerre com " +
-      "tds_debug_stop. Os fontes dos breakpoints precisam estar compilados (o retorno avisa " +
-      "quando o arquivo local difere do RPO).",
+      "modo 'headless': o tds-mcp abre o programa num navegador invisível, para rotinas sem " +
+      "tela; um diálogo não tem como ser respondido nele. modo 'navegador': devolve `abrirCom` " +
+      "({url, isolatedContext}); abra com new_page do chrome-devtools passando os dois (sem o " +
+      "contexto isolado, o webapp usa o último programa salvo no perfil do navegador e roda fora " +
+      "do depurador), opere as telas no chrome-devtools e acompanhe com tds_debug_wait. " +
+      "modulo (só no modo navegador): roda a rotina dentro do módulo, como o usuário no menu " +
+      "(empresa, filial, data base, MV_, variáveis do módulo, Pergunte com tela). A tela pede " +
+      "login com usuário e senha do Protheus (os mesmos de tds_use_server; sem eles, peça ao " +
+      "usuário) e mostra empresa (campo Grupo) e filial já preenchidas com o último acesso: " +
+      "troque com fill antes de Entrar se o usuário pediu outra. Depois vêm avisos e diálogos " +
+      "de entrada do módulo; a carga pode levar minutos. No tds_monitor_users essa thread aparece " +
+      "como programa SIGABPM. Sem modulo, a função é o programa inicial e roda sem empresa " +
+      "aberta. modo 'job': também captura threads novas do ambiente (StartJob, REST), inclusive " +
+      "jobs alheios do servidor; use só em AppServer de desenvolvimento dedicado. Com " +
+      "aguardarSeg > 0 espera a primeira parada e já devolve o estado como tds_debug_wait. Uma " +
+      "sessão por vez; encerre com tds_debug_stop. Os fontes dos breakpoints precisam estar " +
+      "compilados (`avisos` aponta arquivo local diferente do RPO e linha onde o depurador não para).",
     inputSchema: {
       programa: z
         .string()
         .min(1)
-        .describe("A rotina a executar, como no SmartClient (ex.: u_zMinhaRotina). Nunca SIGAMDI/SIGABPM: use modulo"),
+        .describe(
+          "Só o nome da rotina, sem parênteses (ex.: u_zMinhaRotina). Nunca SIGAMDI/SIGABPM: para rodar no módulo, use modulo"
+        ),
       argumentos: z
         .array(z.string())
         .optional()
-        .describe("Parâmetros da rotina (equivalem a -A/&A=), chegam como caractere. Não combinam com modulo"),
+        .describe(
+          "Parâmetros da rotina, cada um chega como caractere (['10'] -> \"10\"); numérico, lógico ou data pede wrapper. Não combinam com modulo"
+        ),
       modulo: z
         .string()
         .optional()
@@ -1451,7 +1468,9 @@ server.registerTool(
         .min(0)
         .max(600)
         .optional()
-        .describe("Segundos para esperar a primeira parada (padrão 60; no modo navegador padrão 0)"),
+        .describe(
+          "Segundos para esperar a primeira parada (padrão 60; no modo navegador padrão 0). Use até 100: acima disso o cliente pode mover a chamada para segundo plano"
+        ),
       pastaFontes: z
         .string()
         .optional()
@@ -1460,8 +1479,10 @@ server.registerTool(
         .string()
         .optional()
         .describe(
-          "Pasta onde gravar os arquivos que o programa manda ao navegador (PDF do FWMSPrinter, CpyS2TW); " +
-            "padrão: %TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Modos headless e job"
+          "Caminho absoluto da pasta onde gravar os arquivos que o programa manda ao navegador (PDF do " +
+            "FWMSPrinter, CpyS2TW), listados em arquivosBaixados no retorno de wait/step; padrão: " +
+            "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Só modos headless e job: no modo " +
+            "navegador o download fica com o navegador do chrome-devtools"
         ),
     },
   },
@@ -1507,16 +1528,19 @@ server.registerTool(
   {
     title: "Depurar: esperar parada",
     description:
-      "Espera o programa em depuração parar (breakpoint, passo) ou terminar e devolve o estado: " +
-      "local, pilha, variáveis Local/Private/Static do topo, watches, o que mudou desde a parada " +
-      "anterior e mensagens (logpoints, erros). estado 'executando' = ainda não parou no prazo " +
-      "(o programa pode estar esperando interação na tela): nos modos headless e job vêm `tela` " +
-      "(texto) e `botoes` do navegador invisível; no modo navegador, conectado=false indica que " +
-      "nenhum webapp abriu a sessão. Erro de execução vem em erroDeExecucao (mensagem, " +
-      "pilha e variáveis da tela de erro) com estado 'encerrado'. Use timeoutSeg até 100: " +
-      "chamada mais longa estoura o prazo de ferramenta do cliente.",
+      "Espera o programa em depuração parar (breakpoint, passo) ou terminar. Campo `estado`: " +
+      "'parado' traz local, pilha, `variaveis` Local/Private/Static do topo, `watches` e " +
+      "`alteradas` (o que mudou desde a parada anterior); 'executando' = não parou no prazo: nos " +
+      "modos headless e job vêm `tela` (texto) e `botoes` do navegador invisível, e no modo " +
+      "navegador `conectado` (false = nenhum webapp abriu a sessão; confira a aba) e `dica`; " +
+      "'encerrado' = o programa terminou: erro de execução vem em `erroDeExecucao` (resumo e " +
+      "detalhes da tela de erro, com pilha e variáveis) ou numa mensagem de nível ERROR, e no modo " +
+      "navegador vem `fecharAba`. Em qualquer estado: `mensagens` (logpoints, rastros com nível " +
+      "RASTRO, erros) desde a chamada anterior e `arquivosBaixados` (arquivos que o programa mandou " +
+      "ao navegador, com caminho local; modos headless e job). Use timeoutSeg até 100 e repita " +
+      "enquanto vier 'executando': chamada mais longa pode ir para segundo plano no cliente.",
     inputSchema: {
-      timeoutSeg: z.number().min(1).max(600).optional().default(60),
+      timeoutSeg: z.number().min(1).max(600).optional().default(60).describe("Segundos de espera; use até 100"),
     },
     annotations: { readOnlyHint: true },
   },
@@ -1533,7 +1557,7 @@ server.registerTool(
       "chamador. Devolve o novo estado como tds_debug_wait.",
     inputSchema: {
       acao: z.enum(["continuar", "proxima", "entrar", "sair"]),
-      timeoutSeg: z.number().min(1).max(600).optional().default(60),
+      timeoutSeg: z.number().min(1).max(600).optional().default(60).describe("Segundos de espera pela próxima parada; use até 100"),
     },
   },
   safe(async ({ acao, timeoutSeg }) => jsonResult(await debugManager.require().step(acao, timeoutSeg ?? 60)))
@@ -1633,11 +1657,15 @@ server.registerTool(
   {
     title: "Depurar: encerrar sessão",
     description:
-      "Encerra a sessão de depuração: libera a thread no AppServer (uma thread parada em " +
-      "breakpoint fica presa até o depurador sair) e fecha o navegador headless. Sempre chame " +
-      "ao terminar. Sessões sem uso também encerram sozinhas após o tempo de inatividade. No modo " +
-      "navegador a aba é do chrome-devtools: o retorno traz `fecharAba`; feche-a com close_page, " +
-      "senão a thread continua no AppServer e a janela fica aberta.",
+      "Encerra a sessão de depuração: libera a thread parada num breakpoint e fecha o navegador " +
+      "headless. Sempre chame ao terminar, inclusive depois de erro. Sessão sem uso encerra " +
+      "sozinha depois de debugIdleMinutes do config (padrão 10 min; no modo navegador, o triplo). " +
+      "Devolve `encerrada` (false = não havia sessão ativa). No modo navegador a aba é do " +
+      "chrome-devtools e vem `fecharAba`: texto com o nome do contexto isolado (tds-<id>, o " +
+      "mesmo de abrirCom); ache a aba com list_pages (ela mostra isolatedContext=tds-<id> e a " +
+      "URL com DEBUG=<id>) e feche com close_page. Programa que não estava parado num breakpoint " +
+      "continua no AppServer até a aba fechar. Se a sessão já tinha encerrado por inatividade, o " +
+      "aviso da aba vem uma vez, no erro da próxima chamada de depuração ou aqui.",
     inputSchema: {},
   },
   safe(async () => {
@@ -1652,24 +1680,40 @@ server.registerTool(
   {
     title: "Executar programa (sem depurar)",
     description:
-      "Executa uma função no servidor/ambiente conectado, num SmartClient HTML invisível, e diz " +
-      "como terminou: 'concluido', 'erro' (mensagem, fonte/linha e a tela de detalhes com pilha " +
-      "e variáveis) ou 'tempoEsgotado' (ainda rodando ou esperando interação; vem o texto da tela " +
-      "e os botões). Não devolve o valor de retorno da função. Arquivos que o programa manda ao " +
-      "navegador (PDF do FWMSPrinter, CpyS2TW) vêm em arquivosBaixados. Relatório que grava " +
-      "arquivo fixo trava no diálogo 'já existe, deseja sobrescrever?' a partir da segunda " +
-      "execução: o fonte deve apagar o arquivo antes (File + FErase) ou usar nome único. Para " +
-      "rotinas com tela, use tds_debug_start no modo navegador. Pergunte ao usuário antes de " +
-      "executar num servidor.",
+      "Executa uma função no servidor/ambiente conectado, num navegador invisível com o " +
+      "SmartClient HTML (webapp), e diz como terminou no campo `resultado`: 'concluido', 'erro' " +
+      "(mensagem, fonte/linha e a tela de detalhes com pilha e variáveis) ou 'tempoEsgotado' " +
+      "(ainda rodando ou esperando resposta num diálogo; vêm `tela` e `botoes`). No tempo " +
+      "esgotado a execução é encerrada: o navegador fecha e a thread termina (confira com " +
+      "tds_monitor_users se a rotina estava num processamento longo). Não devolve o valor de " +
+      "retorno da função. A função roda SEM empresa aberta (sem xFilial, SX, MV_): rotina que " +
+      "precisa de ambiente vai num wrapper U_zTst... com RpcSetEnv, ou em tds_debug_start com " +
+      "modulo. `programa` aceita só o nome da função; os argumentos chegam todos como caractere " +
+      "(passe ['10'] e a função recebe \"10\"): parâmetro numérico, lógico ou data também pede " +
+      "wrapper. Arquivos que o programa manda ao navegador (PDF do FWMSPrinter, CpyS2TW) vêm em " +
+      "`arquivosBaixados` com o caminho local. Diálogo não tem como ser respondido aqui: " +
+      "relatório que grava arquivo de nome fixo para em 'já existe, deseja sobrescrever?' a partir " +
+      "da segunda execução; o fonte deve apagar o arquivo antes (File + FErase) ou usar nome " +
+      "único. Para rotinas com tela, use tds_debug_start no modo navegador. Pergunte ao usuário " +
+      "antes de executar num servidor.",
     inputSchema: {
-      programa: z.string().min(1).describe("Função, como no SmartClient (ex.: u_zMinhaRotina)"),
-      argumentos: z.array(z.string()).optional().describe("Parâmetros (chegam como caractere)"),
-      timeoutSeg: z.number().min(5).max(600).optional().default(60),
+      programa: z.string().min(1).describe("Só o nome da função, sem parênteses (ex.: u_zMinhaRotina)"),
+      argumentos: z
+        .array(z.string())
+        .optional()
+        .describe("Parâmetros da função, cada um chega como caractere (ex.: ['A', '10'] -> \"A\", \"10\")"),
+      timeoutSeg: z
+        .number()
+        .min(5)
+        .max(600)
+        .optional()
+        .default(60)
+        .describe("Prazo da execução em segundos; acima de ~100 o cliente pode mover a chamada para segundo plano"),
       pastaDownloads: z
         .string()
         .optional()
         .describe(
-          "Pasta onde gravar os arquivos que o programa manda ao navegador; padrão: " +
+          "Caminho absoluto da pasta onde gravar os arquivos que o programa manda ao navegador; padrão: " +
             "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h"
         ),
     },

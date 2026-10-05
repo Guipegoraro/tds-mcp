@@ -7,35 +7,47 @@ description: "Depurar ou executar rotina AdvPL/TLPP no AppServer pelo MCP tds (t
 
 As tools `tds_debug_*` e `tds_run` ligam o depurador da TOTVS ao AppServer conectado e
 rodam o programa no SmartClient HTML (webapp). As descrições das tools são a fonte do
-que cada parâmetro faz; aqui está o processo. Modo navegador, módulo, REST/jobs e
-problemas comuns: [REFERENCE.md](REFERENCE.md).
+que cada parâmetro e campo de retorno significa; aqui está o processo. Modo navegador,
+módulo, headless, REST/jobs, temporários e problemas comuns:
+[REFERENCE.md](REFERENCE.md).
 
-O estado devolvido é **parado** (há local, pilha e variáveis), **executando** (não parou
-no prazo; no headless vêm `tela` e `botoes`, no navegador vem `conectado`) ou
-**encerrado** (programa terminou; erro vem em `erroDeExecucao` ou numa mensagem
-`ERROR`). Arquivo que o programa manda ao navegador (PDF, `CpyS2TW`) vem em
-`arquivosBaixados`, com o caminho local.
+Dois vocabulários de resultado:
+
+- `tds_run` devolve `resultado`: **concluido**, **erro** (mensagem, fonte/linha, pilha) ou
+  **tempoEsgotado** (vêm `tela` e `botoes`; a execução é encerrada).
+- `tds_debug_start`/`wait`/`step` devolvem `estado`: **parado** (local, pilha,
+  variáveis), **executando** (não parou no prazo; headless traz `tela` e `botoes`,
+  navegador traz `conectado`) ou **encerrado** (programa terminou; erro em
+  `erroDeExecucao` ou mensagem de nível `ERROR`).
+
+Arquivo que o programa manda ao navegador (PDF, `CpyS2TW`) vem em `arquivosBaixados`,
+com o caminho local, nos modos headless e job.
 
 ## Passos
 
-1. **Licença.** Pergunte ao usuário: "Posso executar/depurar `<programa>` em
-   `<servidor>/<ambiente>`?" O programa roda de verdade, grava o que gravar, e parado num
-   breakpoint segura a thread no servidor. A licença vale para aquele servidor nesta
-   conversa.
-   Concluído quando: o usuário autorizou servidor e ambiente.
+1. **Licença.** Pergunte ao usuário: "Posso compilar `<fontes>` e executar/depurar
+   `<programa>` em `<servidor>/<ambiente>`?" Compilar troca no RPO a versão que estiver
+   lá (num ambiente compartilhado, a de um colega); o programa roda de verdade, grava o
+   que gravar, e parado num breakpoint segura a thread no servidor. A licença vale para
+   aquele servidor nesta conversa.
+   Concluído quando: o usuário autorizou fontes, servidor e ambiente.
 
 2. **Caminho.** Escolha pelo que a rotina precisa:
-   - Saber se roda ou qual erro dá, sem tela: `tds_run`.
-   - Rotina sem tela: `tds_debug_start` modo `headless`.
-   - Rotina que usa o ambiente do usuário (empresa e filial abertas, `Pergunte`, `MV_`,
-     tabela posicionada pelo menu) ou tem tela: modo `navegador` com `modulo` (código ou
-     nome, ex.: `"04"` / `"SIGAEST"`) e a rotina em `programa`. O tds-mcp abre pelo
-     SIGABPM; você faz o login e confirma os diálogos de entrada no chrome-devtools
-     (REFERENCE.md, "Rotina dentro do módulo").
-   - Rotina que precisa de parâmetros e de ambiente ao mesmo tempo: wrapper `U_zTst...`
-     que monta o cenário e chama a rotina, compilado como **temporário** (passo 3).
-     O wrapper com `RpcSetEnv` roda em modo automático: `Pergunte` não mostra tela e a
-     data sai com ano de 2 dígitos; para ver o que o usuário vê, use `modulo`.
+   - Saber se roda ou qual erro dá, sem tela e sem empresa: `tds_run`. A função roda
+     sem empresa aberta (sem `xFilial`, SX, `MV_`).
+   - Rotina sem tela: `tds_debug_start` modo `headless` (também sem empresa aberta).
+   - Rotina que usa o ambiente do usuário (empresa e filial, `Pergunte`, `MV_`) ou tem
+     tela: modo `navegador` com `modulo` e a rotina em `programa`. Sem o módulo no
+     pedido, pergunte ao usuário em qual módulo a rotina roda. Você faz o login e
+     confirma as telas de entrada no chrome-devtools (REFERENCE.md, "Rotina dentro do
+     módulo").
+   - Rotina com parâmetro numérico, lógico ou data (`argumentos` chegam sempre como
+     caractere e não combinam com `modulo`), com parâmetro e ambiente ao mesmo tempo, ou
+     cujo arquivo gerado (PDF) você precisa conferir: wrapper `U_zTst...` que monta o
+     cenário e chama a rotina, rodado com `tds_run` ou no modo headless (o arquivo volta
+     em `arquivosBaixados`) e compilado como **temporário** (passo 3; REFERENCE.md,
+     "Wrapper de teste"). Empresa e filial do `RpcSetEnv` vêm do usuário; sem elas,
+     pergunte.
    - StartJob, REST, job: modo `job`, só em AppServer de desenvolvimento dedicado
      (REFERENCE.md, "REST e jobs").
    Concluído quando: o caminho escolhido cobre o que a rotina precisa de ambiente e de
@@ -58,7 +70,9 @@ no prazo; no headless vêm `tela` e `botoes`, no navegador vem `conectado`) ou
 
 5. **Espera.** `tds_debug_wait` com `timeoutSeg` até 100 por chamada; repita enquanto
    vier `executando`. A cada `executando`, leia a tela (`tela`/`botoes` no headless,
-   `take_snapshot` no navegador): um diálogo esperando resposta não termina sozinho.
+   `take_snapshot` no navegador): um diálogo esperando resposta não termina sozinho. No
+   headless não há como responder a ele: encerre e ajuste o fonte ou use o modo
+   navegador.
 
 6. **Inspeção — o motivo da sessão.** Leia local, pilha, variáveis e `alteradas`;
    aprofunde com `tds_debug_variables` (chamadores pelo `frame`, `Public`, `Table`),
@@ -73,11 +87,13 @@ no prazo; no headless vêm `tela` e `botoes`, no navegador vem `conectado`) ou
 8. **Encerramento.** `tds_debug_stop` ao terminar, inclusive quando a sessão falhou. No
    modo navegador, siga o `fecharAba` do retorno: `list_pages` e `close_page` da aba do
    contexto `tds-<id>`; programa que não estava parado num breakpoint segue no AppServer
-   até a aba sair. Wrapper
-   temporário que cumpriu o papel: `tds_rpo_temporarios` mostra o que ficou no RPO;
-   remova com `tds_rpo_delete` depois de o usuário confirmar.
+   até a aba sair. Wrapper temporário que cumpriu o papel: `tds_rpo_temporarios` mostra
+   o que ficou no RPO; remova com `tds_rpo_delete` depois de o usuário confirmar fontes,
+   servidor e ambiente.
    Concluído quando: `encerrada`, nenhuma aba `tds-*` aberta no chrome-devtools e
-   `tds_monitor_users` filtrado pela rotina sem thread dela.
+   `tds_monitor_users` sem thread da execução: filtre pelo programa inicial (`SIGABPM` com
+   `modulo`, senão o nome da função ou do wrapper) e confira `computador` e `usuario` —
+   no mesmo servidor pode haver sessão de outro desenvolvedor.
 
 ## Relato
 
