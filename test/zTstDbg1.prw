@@ -55,3 +55,14 @@ User Function zTstDbgE()
     Local nA := 10
     nA := nA + nVarNaoExisteE2e
 Return nA
+
+/*/{Protheus.doc} zTstDbgT
+Abre um dialogo de confirmacao e espera resposta, para o E2E ler a tela.
+@type user function
+@author tds-mcp
+@since 05/10/2026
+@return logical, resposta do dialogo
+/*/
+User Function zTstDbgT()
+    Local lSim := MsgYesNo("Tela de teste do E2E: confirma?", "zTstDbgT")
+Return lSim

@@ -75,6 +75,10 @@ interface Snapshot {
   alteradas?: string[];
   mensagens?: { nivel: string; mensagem: string }[];
   erroDeExecucao?: WebappErrorCapture;
+  conectado?: boolean;
+  dica?: string;
+  tela?: string;
+  botoes?: string[];
 }
 
 /** Valor de variável no formato curto "<tipo> <valor>", com "(+)" quando expansível. */
@@ -193,7 +197,21 @@ export class DebugSession {
         }
       }
     }
-    return { estado: "executando", mensagens: this.takeLogs(), ...this.navegadorStatus() };
+    return { estado: "executando", mensagens: this.takeLogs(), ...this.navegadorStatus(), ...(await this.telaHeadless()) };
+  }
+
+  /**
+   * Texto e botões da tela do navegador headless: sem eles o agente não sabe
+   * se o programa ainda processa ou espera um diálogo (ex.: "Deseja sobrescrever?").
+   */
+  private async telaHeadless(): Promise<{ tela?: string; botoes?: string[] }> {
+    if (!this.browser) return {};
+    const tela = ((await this.browser.screenText().catch(() => undefined)) ?? "").trim();
+    const botoes = (await this.browser.buttons().catch(() => undefined)) ?? [];
+    return {
+      ...(tela ? { tela: tela.length > 2000 ? tela.slice(0, 2000) + "…" : tela } : {}),
+      ...(botoes.length ? { botoes } : {}),
+    };
   }
 
   /** Conexão do webapp e o que conferir no chrome-devtools, no modo navegador. */

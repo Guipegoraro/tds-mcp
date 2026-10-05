@@ -1353,8 +1353,9 @@ server.registerTool(
       "Espera o programa em depuração parar (breakpoint, passo) ou terminar e devolve o estado: " +
       "local, pilha, variáveis Local/Private/Static do topo, watches, o que mudou desde a parada " +
       "anterior e mensagens (logpoints, erros). estado 'executando' = ainda não parou no prazo " +
-      "(o programa pode estar esperando interação na tela); no modo navegador, conectado=false " +
-      "indica que nenhum webapp abriu a sessão. Erro de execução vem em erroDeExecucao (mensagem, " +
+      "(o programa pode estar esperando interação na tela): nos modos headless e job vêm `tela` " +
+      "(texto) e `botoes` do navegador invisível; no modo navegador, conectado=false indica que " +
+      "nenhum webapp abriu a sessão. Erro de execução vem em erroDeExecucao (mensagem, " +
       "pilha e variáveis da tela de erro) com estado 'encerrado'. Use timeoutSeg até 100: " +
       "chamada mais longa estoura o prazo de ferramenta do cliente.",
     inputSchema: {

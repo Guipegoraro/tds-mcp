@@ -194,6 +194,16 @@ try {
   );
   await call("tds_debug_stop");
 
+  // --- headless com diálogo aberto: o wait devolve a tela e os botões
+  await call("tds_debug_start", { programa: "u_zTstDbgT", aguardarSeg: 0 });
+  const dlg = await call("tds_debug_wait", { timeoutSeg: 20 });
+  check(
+    "debug_wait headless com diálogo: executando com tela e botões",
+    dlg.data?.estado === "executando" && /Tela de teste do E2E/.test(dlg.data?.tela ?? "") && (dlg.data?.botoes ?? []).length > 0,
+    short({ tela: dlg.data?.tela, botoes: dlg.data?.botoes })
+  );
+  await call("tds_debug_stop");
+
   // --- modo navegador: URL para o agente abrir e sinal de conexão do webapp
   const nav = await call("tds_debug_start", {
     programa: "u_zTstDbg1",
