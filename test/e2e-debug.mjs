@@ -194,6 +194,36 @@ try {
   );
   await call("tds_debug_stop");
 
+  // --- arquivo enviado ao navegador (CpyS2TW): vem em arquivosBaixados, sem sobrescrever
+  const pastaDl = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-e2e-dl-"));
+  try {
+    const dl1 = await call("tds_run", { programa: "u_zTstDbgD", pastaDownloads: pastaDl, timeoutSeg: 90 });
+    const dl2 = await call("tds_run", { programa: "u_zTstDbgD", pastaDownloads: pastaDl, timeoutSeg: 90 });
+    const a1 = dl1.data?.arquivosBaixados?.[0];
+    const a2 = dl2.data?.arquivosBaixados?.[0];
+    check(
+      "tds_run: arquivo enviado ao navegador vem em arquivosBaixados com o conteúdo",
+      dl1.data?.resultado === "concluido" &&
+        a1?.estado === "concluido" &&
+        /ztstdbgd\.txt$/i.test(a1?.arquivo ?? "") &&
+        fs.readFileSync(a1.arquivo, "latin1").includes("conteudo do teste de download"),
+      short(dl1.data)
+    );
+    check(
+      "segundo download de mesmo nome não sobrescreve o primeiro",
+      /ztstdbgd \(2\)\.txt$/i.test(a2?.arquivo ?? "") && fs.existsSync(a1?.arquivo ?? ""),
+      short(a2)
+    );
+  } finally {
+    fs.rmSync(pastaDl, { recursive: true, force: true });
+  }
+  const padrao = await call("tds_run", { programa: "u_zTstDbg1", timeoutSeg: 60 });
+  const raizDl = path.join(os.tmpdir(), "tds-mcp", "downloads");
+  const sobras = (fs.existsSync(raizDl) ? fs.readdirSync(raizDl) : []).filter(
+    (n) => fs.statSync(path.join(raizDl, n)).mtimeMs > inicioE2e && fs.readdirSync(path.join(raizDl, n)).length === 0
+  );
+  check("pasta padrão de downloads sem arquivo não fica para trás", padrao.data?.resultado === "concluido" && sobras.length === 0, sobras.join(", "));
+
   // --- headless com diálogo aberto: o wait devolve a tela e os botões
   await call("tds_debug_start", { programa: "u_zTstDbgT", aguardarSeg: 0 });
   const dlg = await call("tds_debug_wait", { timeoutSeg: 20 });

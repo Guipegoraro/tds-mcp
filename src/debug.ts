@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DapClient, type DapEvent } from "./dap.js";
-import { HeadlessWebapp, type WebappErrorCapture } from "./webapp.js";
+import { HeadlessWebapp, type ArquivoBaixado, type WebappErrorCapture } from "./webapp.js";
 import type { ActiveSession } from "./session.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -63,6 +63,8 @@ export interface StartOptions {
   modo: DebugMode;
   /** Pasta para o adaptador mapear nomes de fonte para arquivos locais. */
   pastaFontes: string;
+  /** Pasta dos arquivos que o programa manda ao navegador headless. */
+  pastaDownloads?: string;
 }
 
 interface Snapshot {
@@ -80,6 +82,7 @@ interface Snapshot {
   tela?: string;
   botoes?: string[];
   fecharAba?: string;
+  arquivosBaixados?: ArquivoBaixado[];
 }
 
 /** Valor de variável no formato curto "<tipo> <valor>", com "(+)" quando expansível. */
@@ -96,6 +99,7 @@ export class DebugSession {
   readonly servidor: string;
   readonly ambiente: string;
   readonly iniciadaEm = new Date();
+  readonly pastaDownloads?: string;
   url?: string;
   browser?: HeadlessWebapp;
   watches: string[] = [];
@@ -113,6 +117,7 @@ export class DebugSession {
     this.dap = dap;
     this.modo = opts.modo;
     this.programa = opts.descricao ?? opts.programa;
+    this.pastaDownloads = opts.pastaDownloads;
     this.servidor = opts.active.def.name;
     this.ambiente = opts.active.environment;
   }
@@ -180,6 +185,12 @@ export class DebugSession {
    * então o erro é capturado da tela e o diálogo é fechado.
    */
   async waitForStop(timeoutSeg: number): Promise<Snapshot> {
+    const snap = await this.waitForStopInner(timeoutSeg);
+    const baixados = this.browser?.arquivosBaixados ?? [];
+    return baixados.length ? { ...snap, arquivosBaixados: baixados } : snap;
+  }
+
+  private async waitForStopInner(timeoutSeg: number): Promise<Snapshot> {
     this.touch();
     if (this.ended) return { estado: "encerrado", mensagens: this.takeLogs(), ...this.fecharAba() };
     // Já parado: devolve o estado atual em vez de esperar outra parada.
@@ -259,7 +270,9 @@ export class DebugSession {
     if (ev.event === "terminated") {
       this.ended = true;
       this.threadId = undefined;
-      this.browser?.close();
+      // O arquivo que o programa mandou ao navegador pode ainda estar chegando.
+      await this.browser?.aguardarDownloads(20000);
+      void this.browser?.close();
       this.dap.kill();
       return {
         estado: "encerrado",
@@ -439,6 +452,15 @@ export class DebugSession {
     if (this.dap.alive) await this.dap.request("terminate", {}, 300);
     this.ended = true;
     await Promise.all([this.dap.close(), this.browser?.close()]);
+    // Pasta padrão sem nenhum download não fica para trás.
+    const pasta = this.pastaDownloads;
+    if (pasta && path.dirname(pasta) === path.join(os.tmpdir(), "tds-mcp", "downloads")) {
+      try {
+        fs.rmdirSync(pasta);
+      } catch {
+        /* tem arquivos ou já removida */
+      }
+    }
   }
 }
 
@@ -468,6 +490,25 @@ function removeStaleArtifacts(logDir: string): void {
       /* em uso ou já removido */
     }
   }
+  // Downloads da pasta padrão ficam um dia, para o agente conferir o arquivo gerado.
+  const downloads = path.join(logDir, "downloads");
+  const limiteDownloads = Date.now() - 24 * 3600_000;
+  for (const name of fs.existsSync(downloads) ? fs.readdirSync(downloads) : []) {
+    const alvo = path.join(downloads, name);
+    try {
+      if (fs.statSync(alvo).mtimeMs < limiteDownloads) fs.rmSync(alvo, { recursive: true, force: true });
+    } catch {
+      /* em uso ou já removido */
+    }
+  }
+}
+
+/** Pasta padrão dos downloads de uma execução headless: %TEMP%\tds-mcp\downloads\<AAAAMMDD_HHMMSS>_<pid>. */
+export function pastaDownloadsPadrao(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return path.join(os.tmpdir(), "tds-mcp", "downloads", `${stamp}_${process.pid}_${++logSeq}`);
 }
 
 /** Uma sessão por vez; encerra sozinha após inatividade e ao sair do processo. */
@@ -636,7 +677,7 @@ export class DebugManager {
       throw new Error(`O debugAdapter não informou a URL do webapp. ${logs}`.trim());
     }
     if (opts.modo !== "navegador") {
-      session.browser = await HeadlessWebapp.open(opts.chromiumPath!, session.url, logDir);
+      session.browser = await HeadlessWebapp.open(opts.chromiumPath!, session.url, logDir, opts.pastaDownloads);
     }
     // tds_debug_stop (ou o encerramento do MCP) durante a inicialização mata o
     // adaptador sem erro aqui: a sessão não pode virar a ativa; o catch do

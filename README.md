@@ -97,7 +97,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_monitor_send_message` | Envia mensagem ao usuário de uma sessão | **afeta usuário** |
 | `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre | **destrutivo** |
 | `tds_monitor_kill_user` | Derruba a sessão imediatamente | **destrutivo** |
-| `tds_run` | Executa uma função num SmartClient HTML invisível: concluído, erro (fonte/linha + pilha com variáveis) ou tempo esgotado (texto da tela) | **executa código** |
+| `tds_run` | Executa uma função num SmartClient HTML invisível: concluído, erro (fonte/linha + pilha com variáveis) ou tempo esgotado (texto da tela); arquivos enviados ao navegador (PDF, CpyS2TW) em `arquivosBaixados` | **executa código** |
 | `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST); `modulo` roda a rotina dentro do módulo pelo SIGABPM | **executa código** |
 | `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
 | `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
@@ -160,6 +160,11 @@ Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABP
 com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela
 pede login e confirma os diálogos de entrada do módulo; a rotina roda sem argumentos. Sem `modulo`,
 a função é o programa inicial e roda sem empresa aberta.
+
+Nos modos headless e job, o arquivo que o programa manda ao navegador (PDF do FWMSPrinter sem
+WebAgent, `CpyS2TW`) é gravado em `pastaDownloads` (padrão `%TEMP%	ds-mcpdownloads<data_hora>`,
+guardada por 24 h) e listado em `arquivosBaixados`; nome repetido ganha sufixo `(2)` em vez de
+sobrescrever. O fim do programa espera até 2 s pelo início de um download.
 
 Limitações do depurador TOTVS que as tools contornam: `evaluate` só no frame do topo (outros
 frames via `tds_debug_variables`), sem `setVariable` (use `x := v`), pause não interrompe thread

@@ -66,3 +66,15 @@ Abre um dialogo de confirmacao e espera resposta, para o E2E ler a tela.
 User Function zTstDbgT()
     Local lSim := MsgYesNo("Tela de teste do E2E: confirma?", "zTstDbgT")
 Return lSim
+
+/*/{Protheus.doc} zTstDbgD
+Grava um arquivo no servidor e o envia ao navegador, para o E2E de downloads.
+@type user function
+@author tds-mcp
+@since 05/10/2026
+@return numeric, retorno do CpyS2TW (0 = enviado)
+/*/
+User Function zTstDbgD()
+    Local cArq := "\spool\ztstdbgd.txt"
+    MemoWrite(cArq, "conteudo do teste de download")
+Return CpyS2TW(cArq, .T.)

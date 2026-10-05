@@ -91,11 +91,31 @@ export interface WebappErrorCapture {
   detalhes: string;
 }
 
+/** Arquivo que o programa mandou ao navegador (CpyS2TW, PDF do FWMSPrinter sem WebAgent). */
+export interface ArquivoBaixado {
+  arquivo: string;
+  bytes?: number;
+  estado: "baixando" | "concluido" | "cancelado";
+}
+
+/** Caminho livre na pasta: "rel.pdf", depois "rel (2).pdf", "rel (3).pdf"... */
+function caminhoLivre(dir: string, nome: string): string {
+  const base = path.basename(nome) || "download";
+  const ext = path.extname(base);
+  const raiz = base.slice(0, base.length - ext.length);
+  let alvo = path.join(dir, base);
+  for (let n = 2; fs.existsSync(alvo); n++) alvo = path.join(dir, `${raiz} (${n})${ext}`);
+  return alvo;
+}
+
 export class HeadlessWebapp {
   private proc: ChildProcess;
   private ws?: WebSocket;
   private id = 0;
   private pending = new Map<number, (msg: any) => void>();
+  private downloadDir?: string;
+  /** Por guid do download do Chromium. */
+  private downloads = new Map<string, ArquivoBaixado & { nome: string }>();
 
   private constructor(proc: ChildProcess, profileDir: string) {
     this.proc = proc;
@@ -115,8 +135,10 @@ export class HeadlessWebapp {
    * Dois Chromium no mesmo perfil não convivem (o segundo sai com código 21
    * sem abrir o CDP), então cada execução usa uma pasta nova: execuções
    * simultâneas em sessões diferentes do tds-mcp não se bloqueiam.
+   * Com `downloadDir`, os arquivos que o programa manda ao navegador são
+   * gravados ali com o nome sugerido pelo servidor.
    */
-  static async open(chromiumPath: string, url: string, baseDir: string): Promise<HeadlessWebapp> {
+  static async open(chromiumPath: string, url: string, baseDir: string, downloadDir?: string): Promise<HeadlessWebapp> {
     fs.mkdirSync(baseDir, { recursive: true });
     const profileDir = fs.mkdtempSync(path.join(baseDir, "chromium-profile-"));
     const portFile = path.join(profileDir, "DevToolsActivePort");
@@ -173,11 +195,66 @@ export class HeadlessWebapp {
           page.pending.get(msg.id)!(msg);
           page.pending.delete(msg.id);
         }
+        if (msg.method) page.onEvent(msg.method, msg.params ?? {});
       };
+      if (downloadDir) {
+        fs.mkdirSync(downloadDir, { recursive: true });
+        page.downloadDir = downloadDir;
+        // allowAndName grava com o guid como nome; o arquivo é renomeado para
+        // o nome sugerido ao concluir, sem sobrescrever outro de mesmo nome.
+        await page.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: downloadDir, eventsEnabled: true });
+      }
       return page;
     } catch (err) {
       await page.close();
       throw err;
+    }
+  }
+
+  private onEvent(method: string, params: any): void {
+    if (!this.downloadDir) return;
+    if (method === "Browser.downloadWillBegin") {
+      const nome = String(params.suggestedFilename ?? "download");
+      this.downloads.set(params.guid, { nome, arquivo: path.join(this.downloadDir, nome), estado: "baixando" });
+    } else if (method === "Browser.downloadProgress") {
+      const d = this.downloads.get(params.guid);
+      if (!d || d.estado !== "baixando") return;
+      if (params.state === "completed") {
+        d.bytes = params.receivedBytes;
+        d.estado = "concluido";
+        try {
+          d.arquivo = caminhoLivre(this.downloadDir, d.nome);
+          fs.renameSync(path.join(this.downloadDir, params.guid), d.arquivo);
+        } catch {
+          d.arquivo = path.join(this.downloadDir, params.guid);
+        }
+      } else if (params.state === "canceled") {
+        d.estado = "cancelado";
+      }
+    }
+  }
+
+  /** Arquivos recebidos pelo navegador nesta execução. */
+  get arquivosBaixados(): ArquivoBaixado[] {
+    return [...this.downloads.values()].map(({ arquivo, bytes, estado }) => ({
+      arquivo,
+      ...(bytes !== undefined ? { bytes } : {}),
+      estado,
+    }));
+  }
+
+  /**
+   * Espera os downloads terminarem, até `ms`. O arquivo enviado no fim do
+   * programa (CpyS2TW) começa a chegar ao navegador depois de a thread
+   * terminar: durante `inicioMs` ainda se espera um download começar.
+   */
+  async aguardarDownloads(ms: number, inicioMs = 2000): Promise<void> {
+    if (!this.downloadDir) return;
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      const baixando = [...this.downloads.values()].some((d) => d.estado === "baixando");
+      if (!baixando && Date.now() - t0 >= inicioMs) return;
+      await sleep(250);
     }
   }
 

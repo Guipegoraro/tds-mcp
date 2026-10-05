@@ -25,7 +25,7 @@ import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
 import { resolveDebugAdapterPath } from "./dap.js";
 import { resolveChromiumPath } from "./webapp.js";
 import { lintFiles } from "./linter.js";
-import { DebugManager, type BreakpointSpec, type DebugMode } from "./debug.js";
+import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
 import { TEMPORARIOS_FILE, loadTemporarios, nomeNoRpo, registrarCompilacao, removerTemporarios, temporariosDe } from "./temporarios.js";
@@ -1338,11 +1338,15 @@ async function startDebug(args: {
   breakpoints?: { arquivo: string; linha: number; condicao?: string; log?: string; contagem?: string; rastro?: string[] }[];
   modo: DebugMode;
   pastaFontes?: string;
+  pastaDownloads?: string;
 }) {
   if (args.modulo && args.modo !== "navegador") {
     throw new Error(
       "modulo exige modo 'navegador': o SIGABPM pede login e diálogos do módulo, operados no chrome-devtools."
     );
+  }
+  if (args.pastaDownloads && args.modo === "navegador") {
+    throw new Error("pastaDownloads vale nos modos headless e job; no modo navegador o download é do chrome-devtools.");
   }
   const inicial = programaInicial(args.programa, args.argumentos ?? [], args.modulo);
   const { session } = await ensureClient();
@@ -1371,6 +1375,8 @@ async function startDebug(args: {
     breakpoints: byFile,
     modo: args.modo,
     pastaFontes,
+    pastaDownloads:
+      args.modo === "navegador" ? undefined : args.pastaDownloads ? path.resolve(args.pastaDownloads) : pastaDownloadsPadrao(),
   });
   return { ...started, avisos };
 }
@@ -1446,9 +1452,16 @@ server.registerTool(
         .string()
         .optional()
         .describe("Pasta dos fontes locais (padrão: pasta do primeiro breakpoint)"),
+      pastaDownloads: z
+        .string()
+        .optional()
+        .describe(
+          "Pasta onde gravar os arquivos que o programa manda ao navegador (PDF do FWMSPrinter, CpyS2TW); " +
+            "padrão: %TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h. Modos headless e job"
+        ),
     },
   },
-  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes }) => {
+  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes, pastaDownloads }) => {
     const mode = (modo ?? "headless") as DebugMode;
     const { session: s, breakpoints: bps, avisos } = await startDebug({
       programa,
@@ -1457,6 +1470,7 @@ server.registerTool(
       breakpoints,
       modo: mode,
       pastaFontes,
+      pastaDownloads,
     });
     const wait = aguardarSeg ?? (mode === "navegador" ? 0 : 60);
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
@@ -1637,20 +1651,33 @@ server.registerTool(
       "Executa uma função no servidor/ambiente conectado, num SmartClient HTML invisível, e diz " +
       "como terminou: 'concluido', 'erro' (mensagem, fonte/linha e a tela de detalhes com pilha " +
       "e variáveis) ou 'tempoEsgotado' (ainda rodando ou esperando interação; vem o texto da tela " +
-      "e os botões). Não devolve o valor de retorno da função. Para rotinas com tela, use " +
-      "tds_debug_start no modo navegador. Pergunte ao usuário antes de executar num servidor.",
+      "e os botões). Não devolve o valor de retorno da função. Arquivos que o programa manda ao " +
+      "navegador (PDF do FWMSPrinter, CpyS2TW) vêm em arquivosBaixados. Relatório que grava " +
+      "arquivo fixo trava no diálogo 'já existe, deseja sobrescrever?' a partir da segunda " +
+      "execução: o fonte deve apagar o arquivo antes (File + FErase) ou usar nome único. Para " +
+      "rotinas com tela, use tds_debug_start no modo navegador. Pergunte ao usuário antes de " +
+      "executar num servidor.",
     inputSchema: {
       programa: z.string().min(1).describe("Função, como no SmartClient (ex.: u_zMinhaRotina)"),
       argumentos: z.array(z.string()).optional().describe("Parâmetros (chegam como caractere)"),
       timeoutSeg: z.number().min(5).max(600).optional().default(60),
+      pastaDownloads: z
+        .string()
+        .optional()
+        .describe(
+          "Pasta onde gravar os arquivos que o programa manda ao navegador; padrão: " +
+            "%TEMP%\\tds-mcp\\downloads\\<data_hora>, guardada por 24 h"
+        ),
     },
   },
-  safe(async ({ programa, argumentos, timeoutSeg }) => {
+  safe(async ({ programa, argumentos, timeoutSeg, pastaDownloads }) => {
     const t0 = Date.now();
-    const { session: s } = await startDebug({ programa, argumentos, modo: "headless" });
+    const { session: s } = await startDebug({ programa, argumentos, modo: "headless", pastaDownloads });
     try {
       const fim = await s.waitForStop(timeoutSeg ?? 60);
       const duracaoSeg = Math.round((Date.now() - t0) / 100) / 10;
+      const baixados = s.browser?.arquivosBaixados ?? [];
+      const arquivos = baixados.length ? { arquivosBaixados: baixados } : {};
       if (fim.estado === "encerrado") {
         const erroLog = (fim.mensagens ?? []).find((m) => m.nivel === "ERROR");
         if (fim.erroDeExecucao || erroLog) {
@@ -1660,9 +1687,10 @@ server.registerTool(
             duracaoSeg,
             erro: erroLog?.mensagem ?? fim.erroDeExecucao?.resumo,
             ...(fim.erroDeExecucao ? { detalhes: fim.erroDeExecucao.detalhes } : {}),
+            ...arquivos,
           });
         }
-        return jsonResult({ programa, resultado: "concluido", duracaoSeg, mensagens: fim.mensagens });
+        return jsonResult({ programa, resultado: "concluido", duracaoSeg, mensagens: fim.mensagens, ...arquivos });
       }
       const tela = (await s.browser?.screenText()) ?? "";
       const botoes = (await s.browser?.buttons()) ?? [];
@@ -1672,6 +1700,7 @@ server.registerTool(
         duracaoSeg,
         tela: tela.slice(0, 4000),
         botoes,
+        ...arquivos,
         observacao: "Execução interrompida ao fim do prazo. Rotina com tela: use tds_debug_start modo navegador.",
       });
     } finally {
