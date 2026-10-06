@@ -297,8 +297,11 @@ em texto): ali não há print, e o relato diz isso.
 
 - **`tds_use_server` falha com "Server returned a non numeric value"**: o AppServer não
   abriu o ambiente. A causa costuma ser o banco fora do ar (TOPConnect/DBAccess erro -35,
-  ex.: SQL Server sem memória) ou o RPO travado, e o motivo exato está no console.log do
-  AppServer. Avise o usuário; repetir não resolve.
+  ex.: SQL Server sem memória), o RPO travado ou outro AppServer no ar com o mesmo
+  RootPath: a SpecialKey de `\SEMAFORO\SPECIAL.KEY` vale para um AppServer só, e o login
+  falha de forma intermitente com MYSPECIALKEY. O motivo exato está no console.log do
+  AppServer. Avise o usuário e não repita em laço: um login que passa depois de falhar
+  não tira o conflito.
 - **chrome-devtools responde "The browser is already running for ...chrome-profile"**: outra
   sessão do Claude está com o navegador do perfil compartilhado. O MCP chrome-devtools
   precisa do argumento `--isolated` (README do tds-mcp); avise o usuário, que reconecta o
@@ -326,9 +329,8 @@ em texto): ali não há print, e o relato diz isso.
   do servidor no servers.json do TDS:
   `"webappUrls": { "NomeDoServidor": "http://host:porta/webapp/" }`.
 - **`Array {size=NIL}` num frame chamador**: expanda com `caminho` para ver os itens.
-- **Propriedade de objeto dentro de método**: em classe AdvPL (.prw), `tds_debug_evaluate`
-  devolve o valor com `::prop` e com `self:prop`, executa `::Metodo()` e aceita
-  `::prop := v`; o objeto aparece em `Local` como `SELF`. Se `::prop` vier NIL, confira
-  com `self:prop` antes de concluir que a propriedade está vazia (o TDS registrou NIL
-  indevido com `::`, issue totvs/tds-vscode#1352). Em classe TLPP (.tlpp) não foi
-  medido.
+- **Propriedade de objeto dentro de método**: em classe AdvPL (.prw) e TLPP (.tlpp),
+  `tds_debug_evaluate` devolve o valor com `::prop` e com `self:prop`, executa
+  `::Metodo()` e aceita `::prop := v`; o objeto aparece em `Local` como `SELF`. Se
+  `::prop` vier NIL, confira com `self:prop` antes de concluir que a propriedade está
+  vazia (o TDS registrou NIL indevido com `::`, issue totvs/tds-vscode#1352).

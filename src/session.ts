@@ -275,8 +275,10 @@ export class SessionManager {
           if (/non numeric value/i.test(msg)) {
             throw new Error(
               `${msg} O AppServer não conseguiu abrir o ambiente "${env}": a causa costuma ser o banco ` +
-                "fora do ar (TOPConnect/DBAccess erro -35, ex.: SQL Server sem memória) ou o RPO em uso " +
-                "travado; o motivo exato está no console.log do AppServer."
+                "fora do ar (TOPConnect/DBAccess erro -35, ex.: SQL Server sem memória), o RPO em uso " +
+                "travado ou outro AppServer no ar com o mesmo RootPath (a SpecialKey de " +
+                "\\SEMAFORO\\SPECIAL.KEY vale para um AppServer só, e o login falha de forma intermitente " +
+                "com MYSPECIALKEY); o motivo exato está no console.log do AppServer."
             );
           }
           throw err;
