@@ -75,6 +75,17 @@ const ADVPL_SOURCE_EXT = [
 const ADVPL_RESOURCE_EXT = [".tres", ".png", ".bmp", ".res", ".js", ".rptdesign"];
 
 const config = loadConfig();
+
+/**
+ * Relê o ~/.tds-mcp/config.json no mesmo objeto (o SessionManager guarda a
+ * referência): credencial gravada depois de o MCP subir vale no próximo
+ * tds_use_server, sem reconectar o MCP.
+ */
+function recarregarConfig(): void {
+  const novo = loadConfig();
+  for (const k of Object.keys(config)) if (!(k in novo)) delete (config as unknown as Record<string, unknown>)[k];
+  Object.assign(config, novo);
+}
 let client: AdvplsClient | undefined;
 let session: SessionManager | undefined;
 /** Binário do advpls em execução (o resolvido na última inicialização). */
@@ -301,9 +312,10 @@ server.registerTool(
       "Conecta e autentica em um servidor/ambiente do servers.json para as demais tools. " +
       "Com usuario e senha informados, autentica com eles (valem só para esta sessão do MCP; " +
       "não são gravados). Sem eles, tenta o token de reconexão salvo pelo TDS e, se falhar, as " +
-      "credenciais de ~/.tds-mcp/config.json. Devolve também `prefixoWrapper`: o início do nome " +
-      "de wrapper de teste desta pessoa nesta máquina (ex.: zTK3F); complete com 3 letras da " +
-      "rotina (zTK3FCal) para não colidir no RPO com o wrapper de outro desenvolvedor. " +
+      "credenciais de ~/.tds-mcp/config.json (relido a cada chamada). Devolve também " +
+      "`prefixoWrapper`: o início do nome de wrapper de teste desta pessoa nesta máquina " +
+      "(ex.: zTK3F); complete com 3 letras da rotina (zTK3FCal) para não colidir no RPO com o " +
+      "wrapper de outro desenvolvedor. " +
       "`maquinaLocal` é o nome desta máquina: as execuções do tds_run e do tds_debug_start " +
       "aparecem no tds_monitor_users com esse `computador` (compare sem diferenciar maiúsculas).",
     inputSchema: {
@@ -314,6 +326,7 @@ server.registerTool(
     },
   },
   safe(async ({ servidor, ambiente, usuario, senha }) => {
+    recarregarConfig();
     const { session } = await ensureClient();
     if ((usuario === undefined) !== (senha === undefined)) {
       throw new Error("Informe usuario e senha juntos, ou nenhum dos dois.");

@@ -261,12 +261,26 @@ export class SessionManager {
         });
         if (fresh.connectionToken) authConnToken = fresh.connectionToken;
       }
-      const auth = await this.client.authenticate({
-        connectionToken: authConnToken,
-        environment: env,
-        user: creds.user,
-        password: creds.password,
-      });
+      const auth = await this.client
+        .authenticate({
+          connectionToken: authConnToken,
+          environment: env,
+          user: creds.user,
+          password: creds.password,
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          // O AppServer devolve essa mensagem quando falha ao abrir o ambiente,
+          // e o motivo fica só no console.log dele.
+          if (/non numeric value/i.test(msg)) {
+            throw new Error(
+              `${msg} O AppServer não conseguiu abrir o ambiente "${env}": a causa costuma ser o banco ` +
+                "fora do ar (TOPConnect/DBAccess erro -35, ex.: SQL Server sem memória) ou o RPO em uso " +
+                "travado; o motivo exato está no console.log do AppServer."
+            );
+          }
+          throw err;
+        });
       if (auth.connectionToken) {
         this.current = {
           def,
