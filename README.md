@@ -68,7 +68,8 @@ Autenticação, em ordem:
 1. **Token de reconexão salvo pelo TDS** — funciona sem senha nenhuma. Se expirar, basta
    conectar no servidor pelo VS Code uma vez para renovar.
 2. **Credenciais em `~/.tds-mcp/config.json`** — fallback opcional (veja
-   [Configuração](#configuração)).
+   [Configuração](#configuração)). O arquivo é relido a cada `tds_use_server`: credencial gravada
+   com o MCP aberto vale sem reconectar.
 
 A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao mesmo tempo.
 
@@ -176,9 +177,12 @@ sobrescrever. O fim do programa espera até 2 s pelo início de um download.
 ### TOTVS WebAgent
 
 O WebAgent é o agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop:
-`GetRemoteType()` 1, arquivo local, Excel, impressão e PDF abrindo no visualizador da máquina. O
-tds-mcp sobe uma instância própria do agente em cada execução, numa porta livre, sem mexer no
-agente que o usuário tiver aberto, e a encerra no fim.
+`GetRemoteType()` 1, arquivo local, Excel, impressão, porta serial (`MsOpenPort`) e PDF abrindo no
+visualizador da máquina. Ele roda na máquina do tds-mcp: arquivos, impressoras e portas COM são os
+dela. O tds-mcp sobe uma instância própria do agente em cada execução, numa porta livre, sem mexer
+no agente que o usuário tiver aberto, e a encerra no fim (no modo navegador, quando a página sai do
+programa ou a aba fecha, no máximo 2 h depois do stop: agente encerrado com a página ligada faria o
+webapp abrir outro pelo protocolo `web-agent:` do Windows).
 
 - Ligado por padrão no modo navegador (alguém acompanha a tela); desligado em `tds_run`, headless
   e job, que seguem recebendo o arquivo gerado como download. `webAgent: true`/`false` muda numa execução.
@@ -320,7 +324,9 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 
 Um caminho informado (`advplsPath`, `debugAdapterPath`, `chromiumPath`, `webAgentPath` ou as variáveis de
 ambiente) que não existe é erro: o tds-mcp não troca por outro binário sem avisar. Campo com
-tipo errado ou JSON inválido no config é ignorado com aviso em `avisosConfig` do `tds_server_log`.
+tipo errado ou JSON inválido no config é ignorado com aviso em `avisosConfig` do `tds_server_log` (e no
+erro do `tds_use_server` que depender dele). O config é relido a cada `tds_use_server`;
+`debugIdleMinutes` e `advplsPath` só mudam ao reconectar o MCP.
 
 ## Desenvolvimento e testes
 
@@ -336,7 +342,7 @@ node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MC
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele
 node test/e2e-debug-bordas.mjs <srv> [amb]     # inatividade no navegador, download no modo job, parâmetros inválidos (depois do e2e-debug)
-node test/e2e-webagent.mjs <srv> [amb]         # WebAgent no navegador e no headless, recusa e ausência do agente (depois do e2e-debug)
+node test/e2e-webagent.mjs <srv> [amb]         # WebAgent no navegador e no headless (GetTempPath(.T.) da máquina), recusa e ausência do agente (depois do e2e-debug)
 node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
 node test/e2e-rpo-delete.mjs <srv> [amb]       # COMPILA e REMOVE do RPO dois fontes de teste; registro de temporários
 
