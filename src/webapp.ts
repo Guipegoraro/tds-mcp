@@ -205,6 +205,9 @@ export class HeadlessWebapp {
         // o nome sugerido ao concluir, sem sobrescrever outro de mesmo nome.
         await page.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: downloadDir, eventsEnabled: true });
       }
+      // Página aberta por Page.navigate fica sem foco, e o webapp ignora o
+      // clique no botão "Fechar" do diálogo de erro.
+      await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
       // Sem Page.enable o script registrado não roda nas próximas navegações.
       await page.send("Page.enable");
       await page.send("Page.addScriptToEvaluateOnNewDocument", { source: SCRIPT_PORTA_AGENTE });
