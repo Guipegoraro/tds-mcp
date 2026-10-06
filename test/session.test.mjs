@@ -79,5 +79,38 @@ check("configuração sem ambiente registrado usa o token", savedTokenFor(cfg, d
   }
 }
 
+// TLS da sessão: o detectado na validação vale sobre o `secure` do servers.json (appserver.ini trocado depois do cadastro).
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-sess-"));
+  const servers = path.join(dir, "servers.json");
+  fs.writeFileSync(
+    servers,
+    JSON.stringify({ configurations: [{ id: "x1", name: "Dev", address: "localhost", port: 1, environment: "AMB", secure: false, buildVersion: "7.00.240223P" }] })
+  );
+  const antes = process.env.TDS_MCP_SERVERS_JSON;
+  process.env.TDS_MCP_SERVERS_JSON = servers;
+  const cliente = (validation) => ({
+    validation,
+    connect: async (info) => ({ connectionToken: `c-${info.secure ? "tls" : "tcp"}`, needAuthentication: true }),
+    authenticate: async (info) => ({ connectionToken: `a-${info.connectionToken}` }),
+  });
+  const config = { credentials: { Dev: { user: "u", password: "p" } } };
+  try {
+    const tls = await new SessionManager(cliente(async () => ({ build: "7.00.240223P", secure: 1 })), config).useServer("Dev");
+    check("servidor passou a TLS: sessão com secure detectado e conexão segura", tls.secure === true && tls.connectionToken === "a-c-tls", JSON.stringify(tls));
+    const semValidacao = await new SessionManager(
+      cliente(async () => {
+        throw new Error("timeout");
+      }),
+      config
+    ).useServer("Dev");
+    check("validação sem resposta: vale o secure do servers.json", semValidacao.secure === false, JSON.stringify(semValidacao));
+  } finally {
+    if (antes === undefined) delete process.env.TDS_MCP_SERVERS_JSON;
+    else process.env.TDS_MCP_SERVERS_JSON = antes;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 assert.equal(falhas, 0, `${falhas} caso(s) falharam`);
 console.log("\nTODOS OS CASOS DE SESSAO PASSARAM");

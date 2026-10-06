@@ -40,6 +40,8 @@ export interface ActiveSession {
   connectionToken: string;
   user: string;
   authMethod: "none" | "saved-token" | "credentials";
+  /** TLS detectado na conexão; o `secure` do servers.json pode estar desatualizado. */
+  secure: boolean;
   /** Conexão de monitor aberta sob demanda (ver SessionManager.monitorToken). */
   monitorToken?: string;
 }
@@ -218,6 +220,7 @@ export class SessionManager {
         connectionToken: conn.connectionToken,
         user: def.username ?? "",
         authMethod: "none",
+        secure,
       };
       return this.current;
     }
@@ -234,6 +237,7 @@ export class SessionManager {
             connectionToken: rec.connectionToken,
             user: rec.user || def.username || "",
             authMethod: "saved-token",
+            secure,
           };
           return this.current;
         }
@@ -292,6 +296,7 @@ export class SessionManager {
           connectionToken: auth.connectionToken,
           user: creds.user,
           authMethod: "credentials",
+          secure,
         };
         return this.current;
       }

@@ -339,7 +339,8 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 - `credentials` — **senhas em texto plano**. Prefira deixar vazio e usar o token do TDS.
   O arquivo fica fora do repositório; nunca o versione.
 - `webappUrls` — URL do webapp por servidor, quando não for `http(s)://<endereço>:<porta>/webapp/`
-  (porta multiprotocolo)
+  (porta multiprotocolo; `https` quando a conexão detecta TLS, mesmo que o servers.json diga o
+  contrário)
 - `debugIdleMinutes` — minutos sem uso até a sessão de depuração encerrar (padrão 10; no modo
   navegador vale o triplo, porque o uso das telas pelo chrome-devtools não passa pelo tds-mcp)
 - `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
