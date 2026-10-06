@@ -21,3 +21,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Board local do ordna (cartões de avaliação, não distribuídos)
+.ordna/
+tasks/
