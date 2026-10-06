@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isFile } from "./advpls.js";
+import { SCRIPT_PORTA_AGENTE } from "./webagent.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -151,7 +152,7 @@ export class HeadlessWebapp {
         "--no-default-browser-check",
         "--remote-debugging-port=0",
         `--user-data-dir=${profileDir}`,
-        url,
+        "about:blank",
       ],
       { stdio: "ignore", windowsHide: true }
     );
@@ -204,6 +205,10 @@ export class HeadlessWebapp {
         // o nome sugerido ao concluir, sem sobrescrever outro de mesmo nome.
         await page.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: downloadDir, eventsEnabled: true });
       }
+      // Sem Page.enable o script registrado não roda nas próximas navegações.
+      await page.send("Page.enable");
+      await page.send("Page.addScriptToEvaluateOnNewDocument", { source: SCRIPT_PORTA_AGENTE });
+      await page.send("Page.navigate", { url });
       return page;
     } catch (err) {
       await page.close();

@@ -150,12 +150,18 @@ Para o Claude Code enxergá-la, ligue a pasta nas skills do usuário (Windows, s
 mklink /J "%USERPROFILE%\.claude\skills\debugar-advpl" "<repo>\skills\debugar-advpl"
 ```
 
-No modo navegador o tds-mcp devolve `abrirCom` (`url` e `isolatedContext`) para o agente abrir
-com `new_page` do chrome-devtools. O contexto isolado é necessário: o perfil normal do navegador
-guarda o último programa e o uso do TOTVS WebAgent, e o webapp então descarta os parâmetros da URL
-e roda o programa fora do depurador. `tds_debug_wait` informa `conectado` enquanto nenhum webapp
-abriu a sessão. Ao terminar, `tds_debug_stop` devolve `fecharAba` com a aba a fechar (`close_page`):
-aberta, ela mantém no AppServer o programa que não estava parado num breakpoint.
+No modo navegador o tds-mcp devolve `abrirCom` (`url`, `isolatedContext` e, com o WebAgent,
+`initScript`) e `proximoPasso` com as chamadas do chrome-devtools: `new_page` em `about:blank` no
+contexto isolado e `navigate_page` com a `url` e o `initScript`. O contexto isolado é necessário:
+o perfil normal do navegador guarda o último programa, e o webapp então descarta os parâmetros da
+URL e roda o programa fora do depurador. O `initScript` grava a porta do agente no localStorage
+antes de o webapp carregar: o webapp informa essa porta ao AppServer ao abrir a conexão, antes de o
+agente conectar, e sem ela o AppServer trata a sessão como sem agente (`ExecInClient`, como a porta
+serial, volta vazio). O Chromium headless do tds-mcp faz o mesmo sozinho. `tds_debug_wait` informa
+`conectado` enquanto nenhum webapp abriu a sessão e o estado do agente. Ao terminar,
+`tds_debug_stop` devolve `fecharAba` com a aba a fechar (`close_page`): aberta, ela mantém no
+AppServer o programa que não estava parado num breakpoint. O agente da sessão encerra quando a
+página sai do programa ou a aba fecha.
 
 Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABPM dentro do módulo,
 com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela

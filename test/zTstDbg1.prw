@@ -78,3 +78,15 @@ User Function zTstDbgD()
     Local cArq := "\spool\ztstdbgd.txt"
     MemoWrite(cArq, "conteudo do teste de download")
 Return CpyS2TW(cArq, .T.)
+
+/*/{Protheus.doc} zTstDbgW
+Le a pasta temporaria da estacao, que so vem da maquina quando o AppServer
+registrou o WebAgent da sessao, para o E2E do WebAgent.
+@type user function
+@author tds-mcp
+@since 06/10/2026
+@return character, pasta temporaria devolvida por GetTempPath(.T.)
+/*/
+User Function zTstDbgW()
+    Local cTmp := GetTempPath(.T.)
+Return cTmp

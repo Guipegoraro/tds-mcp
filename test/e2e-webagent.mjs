@@ -80,6 +80,13 @@ try {
     nav.data?.webAgent?.ativo === true && /AGENT-PORT=\d+/.test(nav.data?.abrirCom?.url ?? ""),
     short({ webAgent: nav.data?.webAgent, url: nav.data?.abrirCom?.url })
   );
+  check(
+    "navegador: abrirCom traz o initScript da porta e o proximoPasso abre em duas chamadas",
+    /desktopagentport/.test(nav.data?.abrirCom?.initScript ?? "") &&
+      /navigate_page/.test(nav.data?.proximoPasso ?? "") &&
+      nav.data?.webAgent?.conectado === undefined,
+    short({ initScript: nav.data?.abrirCom?.initScript, proximoPasso: nav.data?.proximoPasso, webAgent: nav.data?.webAgent })
+  );
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-e2e-wa-"));
   const pagina = await HeadlessWebapp.open(resolveChromiumPath(), nav.data.abrirCom.url, base);
   try {
@@ -94,6 +101,33 @@ try {
     await call("tds_debug_stop");
     await pagina.close();
     fs.rmSync(base, { recursive: true, force: true });
+  }
+
+  // Funções que vão à estação (ExecInClient, GetTempPath(.T.)) só chegam ao agente se o
+  // AppServer o registrou na abertura da conexão: a porta precisa estar no localStorage.
+  const L_TMP = fs.readFileSync(SRC, "latin1").split(/\r?\n/).findIndex((l) => l.includes("Return cTmp")) + 1;
+  const est = await call("tds_debug_start", {
+    programa: "u_zTstDbgW",
+    modo: "navegador",
+    breakpoints: [{ arquivo: SRC, linha: L_TMP }],
+  });
+  const base2 = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-e2e-wa-"));
+  const pagina2 = await HeadlessWebapp.open(resolveChromiumPath(), est.data.abrirCom.url, base2);
+  try {
+    const parou = await call("tds_debug_wait", { timeoutSeg: 90 });
+    const cTmp = String(parou.data?.variaveis?.Local?.CTMP ?? "").replace(/^C "|"$/g, "");
+    // A pasta do usuário nesta máquina (o TEMP pode vir no nome curto, GUILHE~1); sem o agente
+    // registrado, o webapp devolve uma pasta dele no servidor.
+    const doUsuario = cTmp.toLowerCase().startsWith(path.dirname(os.homedir()).toLowerCase() + path.sep);
+    check(
+      "navegador com WebAgent: GetTempPath(.T.) devolve a pasta temporária desta máquina",
+      parou.data?.estado === "parado" && doUsuario,
+      short({ estado: parou.data?.estado, cTmp, webAgent: parou.data?.webAgent })
+    );
+  } finally {
+    await call("tds_debug_stop");
+    await pagina2.close();
+    fs.rmSync(base2, { recursive: true, force: true });
   }
 
   const semAgente = await call("tds_debug_start", { programa: "u_zTstDbg1", modo: "navegador", webAgent: false });

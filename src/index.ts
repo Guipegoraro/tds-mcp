@@ -25,7 +25,7 @@ import {
 import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
 import { resolveDebugAdapterPath } from "./dap.js";
 import { resolveChromiumPath } from "./webapp.js";
-import { resolveWebAgentPath } from "./webagent.js";
+import { resolveWebAgentPath, SCRIPT_PORTA_AGENTE } from "./webagent.js";
 import { lintFiles } from "./linter.js";
 import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
@@ -1488,9 +1488,11 @@ server.registerTool(
       "num servidor: o programa roda de verdade e, parado num breakpoint, segura a thread. " +
       "modo 'headless': o tds-mcp abre o programa num navegador invisível, para rotinas sem " +
       "tela; um diálogo não tem como ser respondido nele. modo 'navegador': devolve `abrirCom` " +
-      "({url, isolatedContext}); abra com new_page do chrome-devtools passando os dois (sem o " +
-      "contexto isolado, o webapp usa o último programa salvo no perfil do navegador e roda fora " +
-      "do depurador), opere as telas no chrome-devtools e acompanhe com tds_debug_wait. " +
+      "({url, isolatedContext} e, com o WebAgent, initScript) e `proximoPasso` com as chamadas do " +
+      "chrome-devtools para abrir a página (sem o contexto isolado, o webapp usa o último programa " +
+      "salvo no perfil do navegador e roda fora do depurador; sem o initScript, o AppServer não " +
+      "enxerga o WebAgent e ExecInClient, como a porta serial, volta vazio); opere as telas no " +
+      "chrome-devtools e acompanhe com tds_debug_wait. " +
       "modulo (só no modo navegador): roda a rotina dentro do módulo, como o usuário no menu " +
       "(empresa, filial, data base, MV_, variáveis do módulo, Pergunte com tela). A tela pede " +
       "login com usuário e senha do Protheus (os mesmos de tds_use_server; sem eles, peça ao " +
@@ -1584,9 +1586,12 @@ server.registerTool(
       sessao: { programa: s.programa, servidor: s.servidor, ambiente: s.ambiente, modo: s.modo },
       ...(mode === "navegador"
         ? {
-            abrirCom: { url: s.url, isolatedContext: contexto },
+            abrirCom: { url: s.url, isolatedContext: contexto, ...(s.agente ? { initScript: SCRIPT_PORTA_AGENTE } : {}) },
             proximoPasso:
-              `Chame new_page do chrome-devtools com url e isolatedContext "${contexto}" de abrirCom. ` +
+              (s.agente
+                ? `Abra em duas chamadas do chrome-devtools: new_page com url "about:blank" e isolatedContext "${contexto}"; ` +
+                  "depois navigate_page nessa aba com url e initScript de abrirCom. "
+                : `Chame new_page do chrome-devtools com url e isolatedContext "${contexto}" de abrirCom. `) +
               (modulo
                 ? "A tela pede login (usuário e senha do Protheus), depois confirma empresa/filial/data base, " +
                   "o aviso de ambiente e diálogos do módulo (ex.: Moedas): confirme cada um; a carga do módulo " +
@@ -1745,7 +1750,9 @@ server.registerTool(
       "sozinha depois de debugIdleMinutes de ~/.tds-mcp/config.json (padrão 10 min; no modo " +
       "navegador, o triplo). " +
       "Encerra também a instância do WebAgent da sessão (visualizador de PDF ou Excel que ela " +
-      "abriu continuam abertos: são programas do usuário). " +
+      "abriu continuam abertos: são programas do usuário); no modo navegador, quando a página sai " +
+      "do programa ou a aba fecha (agente encerrado com a página ligada faria o webapp abrir outro " +
+      "pelo Windows). " +
       "Devolve `encerrada` (false = não havia sessão ativa). No modo navegador a aba é do " +
       "chrome-devtools e vem `fecharAba`: texto com o nome do contexto isolado (tds-<id>, o " +
       "mesmo de abrirCom); ache a aba com list_pages (ela mostra isolatedContext=tds-<id> e a " +

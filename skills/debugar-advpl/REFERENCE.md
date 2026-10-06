@@ -7,12 +7,19 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
 ## Modo navegador
 
 1. `tds_debug_start` com `modo: "navegador"` devolve `abrirCom`: `url`
-   (`...webapp/?DEBUG=<id>&E=<amb>&P=<programa>`) e `isolatedContext` (`tds-<id>`).
-2. Abra com `new_page` do chrome-devtools passando **os dois**: `url` e
-   `isolatedContext`. O contexto isolado é uma janela com armazenamento limpo. No perfil
-   normal o webapp lembra o último programa e a opção do TOTVS WebAgent (agente local
-   da TOTVS para arquivos e impressão), troca a URL pelo formulário "Parâmetros
-   Iniciais" e roda o programa fora do depurador.
+   (`...webapp/?DEBUG=<id>&E=<amb>&P=<programa>`), `isolatedContext` (`tds-<id>`) e, com
+   o TOTVS WebAgent (agente local da TOTVS para arquivos, impressão e porta serial),
+   `initScript`. O `proximoPasso` diz as chamadas.
+2. Com `initScript`: `new_page` do chrome-devtools com `url: "about:blank"` e o
+   `isolatedContext`, depois `navigate_page` nessa aba com a `url` e o `initScript`. Sem
+   ele: `new_page` com `url` e `isolatedContext`. O contexto isolado é uma janela com
+   armazenamento limpo. No perfil normal o webapp lembra o último programa, troca a URL
+   pelo formulário "Parâmetros Iniciais" e roda o programa fora do depurador. O
+   `initScript` grava a porta do agente antes de o webapp carregar: aberta sem ele, a
+   página conecta no agente, mas o AppServer trata a sessão como sem agente e
+   `ExecInClient` (porta serial, `MsOpenPort` etc.) volta vazio — o erro aparece como
+   `array out of bounds [1] of [0]` em `MSSETPORTNAME` (MATXFUNA.PRX). Nesse caso, feche
+   a aba e abra de novo pelo `proximoPasso`.
 3. Opere a tela até a ação que leva ao breakpoint. `take_snapshot` lê textos, campos e
    botões (componentes `wa-*`; rótulo com tecla de atalho aparece partido, "D" +
    "etalhes"). Campo caractere: `fill`. Campo numérico com máscara (`@E 999`): `fill`
@@ -25,7 +32,8 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    programa espera algo na tela. Parado, a tela congela; depois de
    `tds_debug_step continuar`, opere a tela de novo (MsgInfo, confirmações).
 5. Ao terminar, `tds_debug_stop` e `close_page` da aba `tds-<id>` (o retorno traz
-   `fecharAba`). O stop encerra a thread parada num breakpoint ali mesmo (o resto do
+   `fecharAba`; se ela for a última aba, o `close_page` recusa: `navigate_page` dela para
+   `about:blank`). O stop encerra a thread parada num breakpoint ali mesmo (o resto do
    programa não roda); a que roda ou espera um
    diálogo continua no AppServer, já sem depurador, até a aba fechar. Cada sessão
    esquecida deixa também uma janela a mais. A janela `about:blank` é a do próprio
@@ -48,7 +56,7 @@ são duas execuções: uma no navegador com `modulo`, outra com o wrapper.
 O agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop
 (`GetRemoteType()` 1, arquivo local, Excel, impressão, PDF abrindo no visualizador da
 máquina). O tds-mcp liga uma instância própria por execução: por padrão no modo navegador
-(o `abrirCom.url` já traz `AGENT-PORT`), e em `tds_run`/headless/job só com
+(o `abrirCom.url` já traz `AGENT-PORT`; abra com o `initScript`), e em `tds_run`/headless/job só com
 `webAgent: true` — use quando a rotina depender dele. O agente vem de `webAgentPath` no
 `~/.tds-mcp/config.json`, de `TDS_MCP_WEBAGENT` ou do WebAgent instalado na máquina; a versão
 precisa ser a que o webapp do servidor aceita. O retorno traz `webAgent`: `ativo`,
@@ -70,11 +78,11 @@ certificado não confiável).
   `webAgent: false`. No headless, a página recomeça sem agente sozinha.
 - **Arquivo gerado com o agente:** o PDF do FWMSPrinter abre no visualizador da máquina e
   não vem em `arquivosBaixados`. Arquivo que a rotina grava pelo agente vai para o caminho
-  que ela usa — `GetTempPath()` com o agente pode ser uma pasta do webapp no servidor, não a
-  máquina. `concluido` não prova que o arquivo existe: confira na tela ou peça ao usuário
-  para conferir. Para receber o arquivo, rode sem agente.
+  que ela usa, na máquina. `concluido` não prova que o arquivo existe: confira na tela ou
+  peça ao usuário para conferir. Para receber o arquivo, rode sem agente.
 - **Encerramento:** o `tds_debug_stop`, o fim do `tds_run` e o encerramento por inatividade
-  encerram a instância do agente.
+  encerram a instância do agente; no modo navegador, quando a página sai do programa ou a
+  aba fecha (agente encerrado com a página ligada faria o webapp abrir outro pelo Windows).
   Visualizador de PDF ou Excel que o agente abriu são programas do usuário e continuam
   abertos.
 

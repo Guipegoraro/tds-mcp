@@ -125,6 +125,7 @@ export class WebAgentInstance {
           `do usuário): Import-Certificate -FilePath "${ca}" -CertStoreLocation Cert:\\CurrentUser\\Root`,
       };
     }
+    vivos.add(agente);
     return { agente };
   }
 
@@ -159,15 +160,76 @@ export class WebAgentInstance {
   }
 
   kill(): void {
+    vivos.delete(this);
     try {
       this.proc.kill();
     } catch {
       /* já encerrado */
     }
   }
+
+  /** Encerra o agente e apaga a pasta temporária dele. */
+  encerrar(): void {
+    this.kill();
+    try {
+      fs.rmSync(this.pastaTemp, { recursive: true, force: true });
+    } catch {
+      /* visualizador de PDF aberto pelo agente ainda usa a pasta; a varredura remove depois */
+    }
+  }
+
+  /**
+   * Encerra o agente quando a página do webapp se desligar dele. Agente que
+   * morre com a página ainda ligada faz o webapp reconectar e, sem resposta,
+   * abrir outro agente pelo protocolo web-agent: do Windows, que ninguém
+   * encerra. A página se desliga ao sair do programa (fim, erro, thread
+   * encerrada pelo depurador) ou ao fechar, e o log registra stop-broker por
+   * último; agente sem nenhuma página conectada encerra logo. `maxMs` limita
+   * a espera.
+   */
+  encerrarAoSairDaPagina(maxMs: number): void {
+    if (!/Handshake success/i.test(this.log())) return this.encerrar();
+    const fim = Date.now() + maxMs;
+    let anterior = "";
+    let paradoDesde = Date.now();
+    const timer = setInterval(() => {
+      const log = this.log();
+      if (log !== anterior) {
+        anterior = log;
+        paradoDesde = Date.now();
+      }
+      // Última linha "... SND Action (stop-broker)": a página se desligou do agente.
+      const saiu = /stop-broker\)?\s*$/i.test(log) && Date.now() - paradoDesde >= 3000;
+      if (saiu || this.proc.exitCode !== null || Date.now() >= fim) {
+        clearInterval(timer);
+        this.encerrar();
+      }
+    }, 1000);
+    timer.unref();
+  }
 }
+
+/** Instâncias que este processo subiu e ainda não encerrou. */
+const vivos = new Set<WebAgentInstance>();
+// Último recurso na saída do tds-mcp: agente esperando a aba fechar também cai.
+process.on("exit", () => {
+  for (const a of vivos) a.kill();
+});
 
 /** URL do webapp com a porta do agente. */
 export function comAgente(url: string, porta: number): string {
   return `${url}${url.includes("?") ? "&" : "?"}AGENT-PORT=${porta}`;
 }
+
+/**
+ * Script para rodar antes do webapp carregar: grava no localStorage a porta
+ * do AGENT-PORT da URL. Ao abrir a conexão, o webapp informa ao AppServer a
+ * porta do agente lida do localStorage, antes de o agente conectar; num
+ * perfil novo (contexto isolado, Chromium headless) ela ainda não existe e o
+ * AppServer trata a sessão como sem agente: ExecInClient (porta serial e
+ * demais funções EIC_*) volta vazio, embora o agente esteja conectado.
+ * URL sem AGENT-PORT não mexe no localStorage.
+ */
+export const SCRIPT_PORTA_AGENTE =
+  "(()=>{try{for(const [k,v] of new URLSearchParams(location.search))" +
+  "if(k.toUpperCase()==='AGENT-PORT'&&Number(v)>0)localStorage.setItem('desktopagentport',v)}catch(e){}})()";

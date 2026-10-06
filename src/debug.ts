@@ -84,6 +84,7 @@ interface Snapshot {
   erroDeExecucao?: WebappErrorCapture;
   conectado?: boolean;
   dica?: string;
+  webAgent?: { ativo: boolean; conectado?: boolean; motivo?: string };
   tela?: string;
   botoes?: string[];
   fecharAba?: string;
@@ -236,22 +237,27 @@ export class DebugSession {
     };
   }
 
-  /** Encerra a instância do WebAgent desta sessão e apaga a pasta temporária dela. */
-  encerrarAgente(): void {
+  /**
+   * Encerra a instância do WebAgent desta sessão e apaga a pasta temporária
+   * dela. No modo navegador, com `aoSairDaPagina`, espera a aba do
+   * chrome-devtools sair do webapp (até 2 h).
+   */
+  encerrarAgente(aoSairDaPagina = false): void {
     const agente = this.agente;
     if (!agente) return;
     this.agente = undefined;
-    agente.kill();
-    try {
-      fs.rmSync(agente.pastaTemp, { recursive: true, force: true });
-    } catch {
-      /* visualizador de PDF aberto pelo agente ainda usa a pasta; a varredura remove depois */
-    }
+    if (aoSairDaPagina) agente.encerrarAoSairDaPagina(2 * 3600_000);
+    else agente.encerrar();
   }
 
   /** Situação do WebAgent desta sessão, para os retornos das tools. */
   get webAgentStatus(): { ativo: boolean; conectado?: boolean; motivo?: string } | undefined {
-    if (this.agente) return { ativo: true, conectado: this.agente.conectado };
+    if (this.agente) {
+      // No modo navegador a página ainda não abriu antes do primeiro webapp
+      // conectar: "não conectado" ali não é falha do agente.
+      const conectado = this.agente.conectado;
+      return conectado || this.modo !== "navegador" || this.clienteConectado() ? { ativo: true, conectado } : { ativo: true };
+    }
     return this.webAgentMotivo ? { ativo: false, motivo: this.webAgentMotivo } : undefined;
   }
 
@@ -271,21 +277,28 @@ export class DebugSession {
     return {
       fecharAba:
         `Feche a aba desta sessão no chrome-devtools: list_pages, ache a aba com isolatedContext=${this.contextoIsolado} ` +
-        "e chame close_page com o pageId dela. Programa que não estava parado num breakpoint (rodando ou " +
-        "esperando um diálogo) continua no AppServer até a página sair.",
+        "e chame close_page com o pageId dela; se ela for a última aba (close_page recusa), use " +
+        "navigate_page dela para about:blank. Programa que não estava parado num breakpoint (rodando ou " +
+        "esperando um diálogo) e o WebAgent da sessão continuam até a página sair.",
     };
   }
 
   /** Conexão do webapp e o que conferir no chrome-devtools, no modo navegador. */
-  navegadorStatus(): { conectado?: boolean; dica?: string } {
+  navegadorStatus(): Pick<Snapshot, "conectado" | "dica" | "webAgent"> {
     if (this.modo !== "navegador") return {};
+    const webAgent = this.webAgentStatus;
     if (this.clienteConectado()) {
       return {
         conectado: true,
+        ...(webAgent ? { webAgent } : {}),
         dica:
           "O programa está sob o depurador, mas ainda não parou. Veja a tela no chrome-devtools " +
           "(take_snapshot): ele pode esperar login, confirmação de diálogo ou mostrar o diálogo de erro " +
-          "(botões Detalhes/Fechar).",
+          "(botões Detalhes/Fechar)." +
+          (webAgent?.conectado === false
+            ? " O WebAgent desta sessão não conectou: o programa roda como sem agente (ExecInClient volta " +
+              "vazio, arquivo local e impressão vão pelo navegador)."
+            : ""),
       };
     }
     // O webapp conecta no WebAgent antes do AppServer: agente recusado ou fora
@@ -303,7 +316,8 @@ export class DebugSession {
     return {
       conectado: false,
       dica:
-        "Nenhum webapp se conectou a esta sessão: abra a url com new_page e isolatedContext (abrirCom). " +
+        "Nenhum webapp se conectou a esta sessão: abra a página como diz o proximoPasso do tds_debug_start " +
+        "(abrirCom: url, isolatedContext e, com o WebAgent, initScript). " +
         "Se a página mostrar o formulário 'Parâmetros Iniciais', ela perdeu os parâmetros da URL e o " +
         "programa digitado ali roda fora do depurador: feche a aba e abra de novo com isolatedContext." +
         (agente && !agente.conectado
@@ -499,7 +513,7 @@ export class DebugSession {
     if (this.dap.alive) await this.dap.request("terminate", {}, 300);
     this.ended = true;
     await Promise.all([this.dap.close(), this.browser?.close()]);
-    this.encerrarAgente();
+    this.encerrarAgente(this.modo === "navegador");
     // Pasta padrão sem nenhum download não fica para trás.
     const pasta = this.pastaDownloads;
     if (pasta && path.dirname(pasta) === path.join(os.tmpdir(), "tds-mcp", "downloads")) {
