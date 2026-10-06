@@ -332,7 +332,12 @@ server.registerTool(
       throw new Error("Informe usuario e senha juntos, ou nenhum dos dois.");
     }
     const explicit = usuario !== undefined ? { user: usuario, password: senha! } : undefined;
-    const active = await session.useServer(servidor, ambiente, explicit);
+    const active = await session.useServer(servidor, ambiente, explicit).catch((err: unknown) => {
+      // Credencial ignorada por config.json inválido aparece como "exige autenticação".
+      if (!configWarnings.length) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${msg} Avisos do ~/.tds-mcp/config.json: ${configWarnings.join(" ")}`);
+    });
     return jsonResult({
       conectado: true,
       servidor: active.def.name,
