@@ -54,7 +54,7 @@ Dobro de nValor, sem alterar o objeto.
 Method Dobro() Class zTstCls1
 Return ::nValor * 2
 
-/*/{Protheus.doc} zTstCls1
+/*/{Protheus.doc} U_zTstCls1
 Cria o objeto e chama Somar(5).
 @type user function
 @author tds-mcp

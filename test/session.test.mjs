@@ -69,7 +69,7 @@ check("configuração sem ambiente registrado usa o token", savedTokenFor(cfg, d
   };
   try {
     const e1 = await erroDe(falha("Authentication error: Server returned a non numeric value. See AppServer log console for details."));
-    check("'non numeric value' explica que o ambiente não abriu e aponta o console.log", /não conseguiu abrir o ambiente "AMB"/.test(e1) && /-35/.test(e1) && /SPECIAL\.KEY/.test(e1) && /console.log/.test(e1), e1);
+    check("'non numeric value' explica que o ambiente não abriu e aponta o console.log", /não conseguiu abrir o ambiente "AMB"/.test(e1) && /-35/.test(e1) && /SpecialKey diferente/.test(e1) && /console.log/.test(e1), e1);
     const e2 = await erroDe(falha("Invalid user or password"));
     check("outra falha de autenticação passa sem acréscimo", e2 === "Invalid user or password", e2);
   } finally {

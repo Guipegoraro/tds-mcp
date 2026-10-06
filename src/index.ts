@@ -1770,7 +1770,7 @@ server.registerTool(
       "alterar o programa em execução (nTotal := 0), campos de tabela (SA1->A1_COD, " +
       "SA1->(RecNo())), funções (Len(aItens)) e table:ALIAS para a tabela inteira. Dentro de " +
       "método de classe (AdvPL ou TLPP), ::prop, self:prop, ::Metodo() e ::prop := v valem; o objeto " +
-      "aparece no escopo Local como SELF. ATENÇÃO: roda " +
+      "aparece no escopo Local como SELF; se ::prop vier NIL, confira com self:prop. ATENÇÃO: roda " +
       "código de verdade no servidor — função com efeito colateral (RecLock, gravação) executa. " +
       "String marcada como UTF-8 pelo AppServer (ex.: EncodeUTF8) vem com o prefixo [UTF8]; em sessão aberta com detalheTexto=true, " +
       "resultado string traz `detalhe` com os bytes. Acento escrito na expressão chega ao servidor " +

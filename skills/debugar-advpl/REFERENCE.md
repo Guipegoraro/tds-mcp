@@ -297,9 +297,10 @@ em texto): ali não há print, e o relato diz isso.
 
 - **`tds_use_server` falha com "Server returned a non numeric value"**: o AppServer não
   abriu o ambiente. A causa costuma ser o banco fora do ar (TOPConnect/DBAccess erro -35,
-  ex.: SQL Server sem memória), o RPO travado ou outro AppServer no ar com o mesmo
-  RootPath: a SpecialKey de `\SEMAFORO\SPECIAL.KEY` vale para um AppServer só, e o login
-  falha de forma intermitente com MYSPECIALKEY. O motivo exato está no console.log do
+  ex.: SQL Server sem memória), o RPO travado ou outro AppServer no mesmo RootPath com
+  SpecialKey diferente (quem divide o Protheus_data usa a mesma SpecialKey; o
+  `\SEMAFORO\SPECIAL.KEY` guarda uma só, e o error.log registra "Problemas na configuração
+  da chave SpecialKey"; o login pode falhar e passar alternadamente). O motivo exato está no console.log do
   AppServer. Avise o usuário e não repita em laço: um login que passa depois de falhar
   não tira o conflito.
 - **chrome-devtools responde "The browser is already running for ...chrome-profile"**: outra

@@ -276,9 +276,10 @@ export class SessionManager {
             throw new Error(
               `${msg} O AppServer não conseguiu abrir o ambiente "${env}": a causa costuma ser o banco ` +
                 "fora do ar (TOPConnect/DBAccess erro -35, ex.: SQL Server sem memória), o RPO em uso " +
-                "travado ou outro AppServer no ar com o mesmo RootPath (a SpecialKey de " +
-                "\\SEMAFORO\\SPECIAL.KEY vale para um AppServer só, e o login falha de forma intermitente " +
-                "com MYSPECIALKEY); o motivo exato está no console.log do AppServer."
+                "travado ou outro AppServer no mesmo RootPath com SpecialKey diferente (quem divide o " +
+                "Protheus_data usa a mesma SpecialKey; \\SEMAFORO\\SPECIAL.KEY guarda uma só, e o error.log " +
+                "registra \"Problemas na configuração da chave SpecialKey\"); o motivo exato está no " +
+                "console.log do AppServer."
             );
           }
           throw err;
