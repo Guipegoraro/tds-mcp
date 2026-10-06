@@ -1566,9 +1566,12 @@ server.registerTool(
         .optional()
         .describe(
           "Liga o TOTVS WebAgent (agente local que dá ao webapp o comportamento do SmartClient desktop: " +
-            "GetRemoteType() 1, arquivo local, impressão e PDF abrindo no visualizador da máquina). Padrão: " +
-            "ligado no modo navegador, desligado nos demais. O retorno traz `webAgent` (ativo, ou o motivo de seguir sem ele); " +
-            "com ativo false o programa roda sem agente e o caminho que depende dele não é testado"
+            "GetRemoteType() 1, arquivo local, impressão, porta serial e PDF abrindo no visualizador da " +
+            "máquina). Ele roda nesta máquina (maquinaLocal do tds_use_server): arquivos, impressoras e " +
+            "portas COM são os dela. Padrão: ligado no modo navegador, desligado nos demais. O retorno " +
+            "traz `webAgent` (ativo, ou o motivo de seguir sem ele; no modo navegador, `conectado` só " +
+            "aparece no tds_debug_wait, depois que a página abre); com ativo false o programa roda sem " +
+            "agente e o caminho que depende dele não é testado"
         ),
     },
   },
@@ -1623,7 +1626,9 @@ server.registerTool(
       "'parado' traz local, pilha, `variaveis` Local/Private/Static do topo, `watches` e " +
       "`alteradas` (o que mudou desde a parada anterior); 'executando' = não parou no prazo: nos " +
       "modos headless e job vêm `tela` (texto) e `botoes` do navegador invisível, e no modo " +
-      "navegador `conectado` (false = nenhum webapp abriu a sessão; confira a aba) e `dica`; " +
+      "navegador `conectado` (false = nenhum webapp abriu a sessão; confira a aba), `dica` e, com o " +
+      "agente, `webAgent.conectado` (a página fez o handshake com o WebAgent; o AppServer só o usa " +
+      "se a página foi aberta com o initScript do tds_debug_start); " +
       "'encerrado' = o programa terminou: erro de execução vem em `erroDeExecucao` (resumo e " +
       "detalhes da tela de erro, com pilha e variáveis) ou numa mensagem de nível ERROR, e no modo " +
       "navegador vem `fecharAba`. Em qualquer estado: `mensagens` (logpoints, rastros com nível " +
@@ -1821,7 +1826,8 @@ server.registerTool(
         .optional()
         .default(false)
         .describe(
-          "Liga o TOTVS WebAgent para rotina que depende dele (arquivo local, Excel, GetRemoteType() 1). Com ele, " +
+          "Liga o TOTVS WebAgent para rotina que depende dele (arquivo local, Excel, porta serial, " +
+            "GetRemoteType() 1); ele roda nesta máquina (maquinaLocal), com os arquivos, impressoras e portas COM dela. Com ele, " +
             "o PDF do FWMSPrinter abre no visualizador da máquina e não vem em arquivosBaixados. Se o agente " +
             "não conectar, a execução segue sem ele e `webAgent.motivo` diz por quê: aí o caminho que depende do " +
             "agente não foi testado, mesmo com resultado concluido, e a rotina pode ter seguido o outro ramo (ex.: GetRemoteType() diferente de 1)"

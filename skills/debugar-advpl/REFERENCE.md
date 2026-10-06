@@ -18,8 +18,10 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    `initScript` grava a porta do agente antes de o webapp carregar: aberta sem ele, a
    página conecta no agente, mas o AppServer trata a sessão como sem agente e
    `ExecInClient` (porta serial, `MsOpenPort` etc.) volta vazio — o erro aparece como
-   `array out of bounds [1] of [0]` em `MSSETPORTNAME` (MATXFUNA.PRX). Nesse caso, feche
-   a aba e abra de novo pelo `proximoPasso`.
+   `array out of bounds [1] of [0]` em `MSSETPORTNAME` (MATXFUNA.PRX), mesmo com
+   `webAgent.conectado: true`. A URL de uma sessão cujo programa já terminou não roda de
+   novo: `tds_debug_stop`, `close_page` e outro `tds_debug_start` (o programa roda de
+   novo; pergunte ao usuário antes).
 3. Opere a tela até a ação que leva ao breakpoint. `take_snapshot` lê textos, campos e
    botões (componentes `wa-*`; rótulo com tecla de atalho aparece partido, "D" +
    "etalhes"). Campo caractere: `fill`. Campo numérico com máscara (`@E 999`): `fill`
@@ -27,17 +29,21 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    `type_text`. Botão que não responde ao `click`: confirme no `take_snapshot` que é
    ele que está com foco (marcado `focused`) e só então `press_key` `Enter`. Em diálogo
    de sim/não o foco costuma estar em "Sim": nunca dê Enter sem essa conferência.
-4. `tds_debug_wait` (até 100 s por chamada) acompanha. `conectado: false` = nenhum webapp
-   abriu esta sessão: confira a aba (passo 2). `conectado: true` com `executando` = o
-   programa espera algo na tela. Parado, a tela congela; depois de
+4. `tds_debug_wait` acompanha: 10 a 20 s por chamada enquanto você opera as telas, até
+   100 s quando só espera o breakpoint. `conectado: false` = nenhum webapp abriu esta
+   sessão; com a página aberta há uns 30 s, confira a aba (passo 2). `conectado: true` com
+   `executando` = o programa espera algo na tela. `webAgent.conectado` (só depois que a
+   página abre) diz se a página fez o handshake com o agente; não prova que o AppServer o
+   registrou, o que depende do `initScript` (passo 2). Parado, a tela congela; depois de
    `tds_debug_step continuar`, opere a tela de novo (MsgInfo, confirmações).
 5. Ao terminar, `tds_debug_stop` e `close_page` da aba `tds-<id>` (o retorno traz
    `fecharAba`; se ela for a última aba, o `close_page` recusa: `navigate_page` dela para
    `about:blank`). O stop encerra a thread parada num breakpoint ali mesmo (o resto do
    programa não roda); a que roda ou espera um
    diálogo continua no AppServer, já sem depurador, até a aba fechar. Cada sessão
-   esquecida deixa também uma janela a mais. A janela `about:blank` é a do próprio
-   chrome-devtools: fica aberta enquanto ele estiver ativo e não fecha por `close_page`.
+   esquecida deixa também uma janela a mais. Aba `tds-<id>` levada para `about:blank`
+   conta como fechada: a página saiu do webapp. A aba `about:blank` sem contexto isolado
+   costuma ser a do próprio chrome-devtools; ela não é da sessão.
 
 Erro de execução na tela: "SMARTCLIENT um problema foi encontrado na execução". O
 botão "Detalhes" traz mensagem, linha, pilha com as variáveis de cada nível e o
@@ -54,9 +60,12 @@ são duas execuções: uma no navegador com `modulo`, outra com o wrapper.
 ## TOTVS WebAgent
 
 O agente local da TOTVS que dá ao webapp o comportamento do SmartClient desktop
-(`GetRemoteType()` 1, arquivo local, Excel, impressão, PDF abrindo no visualizador da
-máquina). O tds-mcp liga uma instância própria por execução: por padrão no modo navegador
-(o `abrirCom.url` já traz `AGENT-PORT`; abra com o `initScript`), e em `tds_run`/headless/job só com
+(`GetRemoteType()` 1, arquivo local, Excel, impressão, porta serial, PDF abrindo no
+visualizador da máquina). O agente roda na máquina do tds-mcp (`maquinaLocal`): arquivo,
+impressora e porta serial (ex.: a COM da balança) são os dela, não os do usuário final nem
+os do servidor. O tds-mcp liga uma instância própria por execução: por padrão no modo
+navegador (o `abrirCom.url` já traz `AGENT-PORT`; abra com o `initScript`), e em
+`tds_run`/headless/job só com
 `webAgent: true` — use quando a rotina depender dele. O agente vem de `webAgentPath` no
 `~/.tds-mcp/config.json`, de `TDS_MCP_WEBAGENT` ou do WebAgent instalado na máquina; a versão
 precisa ser a que o webapp do servidor aceita. O retorno traz `webAgent`: `ativo`,
@@ -238,7 +247,7 @@ TOTVS é sempre recusado.
   contexto isolado. Feche a aba e abra de novo com `new_page` + `isolatedContext`.
 - **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes`
   (`~/.tds-mcp/config.json`) sem uso
-  (padrão 10 min; no modo navegador, 30), a próxima chamada falha dizendo qual aba
+  (padrão 10 min; no modo navegador, o triplo: 30 min com o padrão), a próxima chamada falha dizendo qual aba
   fechar. Feche-a (`list_pages` mostra `isolatedContext=tds-<id>` e a URL com
   `DEBUG=<id>`), confira com `tds_monitor_users` se sobrou thread da execução e, com
   autorização do usuário, encerre-a com `tds_monitor_kill_user`. Depois, inicie de novo.
