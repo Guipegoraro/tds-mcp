@@ -326,3 +326,9 @@ em texto): ali não há print, e o relato diz isso.
   do servidor no servers.json do TDS:
   `"webappUrls": { "NomeDoServidor": "http://host:porta/webapp/" }`.
 - **`Array {size=NIL}` num frame chamador**: expanda com `caminho` para ver os itens.
+- **Propriedade de objeto dentro de método**: em classe AdvPL (.prw), `tds_debug_evaluate`
+  devolve o valor com `::prop` e com `self:prop`, executa `::Metodo()` e aceita
+  `::prop := v`; o objeto aparece em `Local` como `SELF`. Se `::prop` vier NIL, confira
+  com `self:prop` antes de concluir que a propriedade está vazia (o TDS registrou NIL
+  indevido com `::`, issue totvs/tds-vscode#1352). Em classe TLPP (.tlpp) não foi
+  medido.
