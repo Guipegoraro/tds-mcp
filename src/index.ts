@@ -312,7 +312,8 @@ server.registerTool(
       "Conecta e autentica em um servidor/ambiente do servers.json para as demais tools. " +
       "Com usuario e senha informados, autentica com eles (valem só para esta sessão do MCP; " +
       "não são gravados). Sem eles, tenta o token de reconexão salvo pelo TDS e, se falhar, as " +
-      "credenciais de ~/.tds-mcp/config.json (relido a cada chamada). Devolve também " +
+      "credenciais de ~/.tds-mcp/config.json (relido a cada chamada; debugIdleMinutes e advplsPath só " +
+      "mudam ao reconectar o MCP). Devolve também " +
       "`prefixoWrapper`: o início do nome de wrapper de teste desta pessoa nesta máquina " +
       "(ex.: zTK3F); complete com 3 letras da rotina (zTK3FCal) para não colidir no RPO com o " +
       "wrapper de outro desenvolvedor. " +
@@ -1626,7 +1627,8 @@ server.registerTool(
       "'parado' traz local, pilha, `variaveis` Local/Private/Static do topo, `watches` e " +
       "`alteradas` (o que mudou desde a parada anterior); 'executando' = não parou no prazo: nos " +
       "modos headless e job vêm `tela` (texto) e `botoes` do navegador invisível, e no modo " +
-      "navegador `conectado` (false = nenhum webapp abriu a sessão; confira a aba), `dica` e, com o " +
+      "navegador `conectado` (do webapp com o depurador; false = nenhum webapp abriu a sessão; confira " +
+      "a aba), `dica` e, com o " +
       "agente, `webAgent.conectado` (a página fez o handshake com o WebAgent; o AppServer só o usa " +
       "se a página foi aberta com o initScript do tds_debug_start); " +
       "'encerrado' = o programa terminou: erro de execução vem em `erroDeExecucao` (resumo e " +
@@ -1760,9 +1762,9 @@ server.registerTool(
       "sozinha depois de debugIdleMinutes de ~/.tds-mcp/config.json (padrão 10 min; no modo " +
       "navegador, o triplo). " +
       "Encerra também a instância do WebAgent da sessão (visualizador de PDF ou Excel que ela " +
-      "abriu continuam abertos: são programas do usuário); no modo navegador, quando a página sai " +
-      "do programa ou a aba fecha (agente encerrado com a página ligada faria o webapp abrir outro " +
-      "pelo Windows). " +
+      "abriu continuam abertos: são programas do usuário). No modo navegador o stop não o encerra na " +
+      "hora: o agente fica vivo até a página sair do programa ou a aba fechar, no máximo 2 h " +
+      "(agente encerrado com a página ligada faria o webapp abrir outro pelo Windows). " +
       "Devolve `encerrada` (false = não havia sessão ativa). No modo navegador a aba é do " +
       "chrome-devtools e vem `fecharAba`: texto com o nome do contexto isolado (tds-<id>, o " +
       "mesmo de abrirCom); ache a aba com list_pages (ela mostra isolatedContext=tds-<id> e a " +

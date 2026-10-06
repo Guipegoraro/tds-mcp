@@ -19,9 +19,12 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    página conecta no agente, mas o AppServer trata a sessão como sem agente e
    `ExecInClient` (porta serial, `MsOpenPort` etc.) volta vazio — o erro aparece como
    `array out of bounds [1] of [0]` em `MSSETPORTNAME` (MATXFUNA.PRX), mesmo com
-   `webAgent.conectado: true`. A URL de uma sessão cujo programa já terminou não roda de
-   novo: `tds_debug_stop`, `close_page` e outro `tds_debug_start` (o programa roda de
-   novo; pergunte ao usuário antes).
+   `webAgent.conectado: true`. Para recuperar: leia o erro ("Detalhes") e clique "Fechar",
+   `tds_debug_stop`, `close_page` e, com licença do usuário (o programa roda de novo),
+   outro `tds_debug_start` aberto com o `initScript`. A URL de uma sessão cujo programa já
+   terminou não roda de novo. Com o agente registrado, porta inexistente ou ocupada não dá
+   esse erro: pelo fonte padrão (MATXFUNA.PRX), o `MsOpenPort` mostra uma `MsgStop` ou
+   devolve .F.
 3. Opere a tela até a ação que leva ao breakpoint. `take_snapshot` lê textos, campos e
    botões (componentes `wa-*`; rótulo com tecla de atalho aparece partido, "D" +
    "etalhes"). Campo caractere: `fill`. Campo numérico com máscara (`@E 999`): `fill`
@@ -84,14 +87,18 @@ certificado não confiável).
 - **Agente recusado no navegador:** o `tds_debug_wait` volta `executando` com
   `conectado: false` e o aviso no campo `dica` (a tela mostra "Acesso não autorizado ao
   WebAgent"). Faça `tds_debug_stop`, `close_page` da aba e inicie de novo com
-  `webAgent: false`. No headless, a página recomeça sem agente sozinha.
+  `webAgent: false`. No headless, a página recomeça sem agente sozinha. Se a rotina depende
+  do agente (porta serial, arquivo local), sem ele o teste não vale: avise o usuário que a
+  versão do WebAgent desta máquina não é a que o webapp do servidor aceita, e que
+  `webAgentPath` no `~/.tds-mcp/config.json` aponta outra versão instalada.
 - **Arquivo gerado com o agente:** o PDF do FWMSPrinter abre no visualizador da máquina e
   não vem em `arquivosBaixados`. Arquivo que a rotina grava pelo agente vai para o caminho
   que ela usa, na máquina. `concluido` não prova que o arquivo existe: confira na tela ou
   peça ao usuário para conferir. Para receber o arquivo, rode sem agente.
 - **Encerramento:** o `tds_debug_stop`, o fim do `tds_run` e o encerramento por inatividade
-  encerram a instância do agente; no modo navegador, quando a página sai do programa ou a
-  aba fecha (agente encerrado com a página ligada faria o webapp abrir outro pelo Windows).
+  encerram a instância do agente. No modo navegador o stop não a encerra na hora: o agente
+  fica vivo até a página sair do programa ou a aba fechar, no máximo 2 h (agente encerrado
+  com a página ligada faria o webapp abrir outro pelo Windows).
   Visualizador de PDF ou Excel que o agente abriu são programas do usuário e continuam
   abertos.
 
@@ -243,6 +250,10 @@ TOTVS é sempre recusado.
 
 ## Problemas comuns
 
+- **`tds_use_server` falha com "Server returned a non numeric value"**: o AppServer não
+  abriu o ambiente. A causa costuma ser o banco fora do ar (TOPConnect/DBAccess erro -35,
+  ex.: SQL Server sem memória) ou o RPO travado, e o motivo exato está no console.log do
+  AppServer. Avise o usuário; repetir não resolve.
 - **Formulário "Parâmetros Iniciais" no lugar do programa**: a URL foi aberta fora do
   contexto isolado. Feche a aba e abra de novo com `new_page` + `isolatedContext`.
 - **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes`
