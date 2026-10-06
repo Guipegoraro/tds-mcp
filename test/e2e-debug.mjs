@@ -164,6 +164,31 @@ try {
   const stop = await call("tds_debug_stop");
   check("debug_stop encerra", stop.data?.encerrada === true, short(stop.data));
 
+  // --- detalheTexto: bytes de strings (charDetails do adaptador, ligado no launch)
+  const det = await call("tds_debug_start", {
+    programa: "u_zTstDbg1",
+    breakpoints: [{ arquivo: SRC, linha: L_SOMA }],
+    aguardarSeg: 60,
+    detalheTexto: true,
+  });
+  check("detalheTexto: para no breakpoint", det.data?.estado === "parado", short(det.data?.local));
+  // Acento escrito na expressão chega ao servidor como "?": o texto é montado com Chr().
+  await call("tds_debug_evaluate", { expressao: 'cNome := "a" + Chr(231) + Chr(227) + "o"' });
+  const detVar = await call("tds_debug_variables", { caminho: ["CNOME"] });
+  check(
+    "detalheTexto: variables até a string traz tamanho e bytes CP1252",
+    detVar.data?.detalhe?.tamanho === 4 && (detVar.data?.detalhe?.bytes ?? []).includes("ç [0xe7] [231]"),
+    short(detVar.data)
+  );
+  const detUtf = await call("tds_debug_evaluate", { expressao: "EncodeUTF8(cNome)" });
+  check(
+    "detalheTexto: evaluate de string UTF-8 traz [UTF8] e 6 bytes",
+    /\[UTF8\]/.test(detUtf.data?.resultado ?? "") && detUtf.data?.detalhe?.tamanho === 6 &&
+      (detUtf.data?.detalhe?.bytes ?? []).includes("Ã [0xc3] [195]"),
+    short(detUtf.data)
+  );
+  await call("tds_debug_stop");
+
   // --- tds_debug_breakpoints: troca os breakpoints com o programa parado
   const bp = await call("tds_debug_start", {
     programa: "u_zTstDbg1",

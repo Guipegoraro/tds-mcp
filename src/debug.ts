@@ -72,7 +72,23 @@ export interface StartOptions {
   webAgentMotivo?: string;
   /** Execução do tds_run: a sessão acaba com o programa ou no prazo, sem tds_debug_stop. */
   porTdsRun?: boolean;
+  /**
+   * Liga o charDetails do adaptador (extendFeatures no launch; o adaptador só
+   * aceita na abertura da sessão): toda string fica expansível, com o detalhe
+   * de bytes lido por variables e evaluate.
+   */
+  detalheTexto?: boolean;
 }
+
+/** Bytes de uma string, do charDetails do adaptador. */
+export interface DetalheTexto {
+  bruto: string;
+  tamanho: number;
+  bytes?: string[];
+  bytesOmitidos?: number;
+}
+
+const MAX_BYTES_DETALHE = 300;
 
 interface Snapshot {
   estado: "parado" | "executando" | "encerrado";
@@ -109,6 +125,7 @@ export class DebugSession {
   readonly iniciadaEm = new Date();
   readonly porTdsRun: boolean;
   readonly pastaDownloads?: string;
+  readonly detalheTexto: boolean;
   /** Instância do WebAgent ligada a esta execução. */
   agente?: WebAgentInstance;
   /** Por que a execução segue sem WebAgent, quando ele foi pedido. */
@@ -132,6 +149,7 @@ export class DebugSession {
     this.programa = opts.descricao ?? opts.programa;
     this.porTdsRun = opts.porTdsRun ?? false;
     this.pastaDownloads = opts.pastaDownloads;
+    this.detalheTexto = !!opts.detalheTexto;
     this.webAgentMotivo = opts.webAgentMotivo;
     this.servidor = opts.active.def.name;
     this.ambiente = opts.active.environment;
@@ -476,9 +494,33 @@ export class DebugSession {
       );
       if (!hit) throw new Error(`"${name}" não encontrado em ${[escopo, ...caminho].join(" > ")}.`);
       if (!(hit.variablesReference > 0)) return { frame, funcao: f.name, escopo: scope.name, caminho, valor: fmt(hit) };
+      if (this.detalheTexto && hit.type === "C") {
+        return { frame, funcao: f.name, escopo: scope.name, caminho, valor: fmt(hit), detalhe: await this.detalheDeTexto(hit.variablesReference) };
+      }
       ref = hit.variablesReference;
     }
     return { frame, funcao: f.name, escopo: scope.name, caminho, itens: await this.listVariables(ref) };
+  }
+
+  /**
+   * Detalhe de uma string com o charDetails do adaptador: o dado bruto (Raw, os
+   * bytes lidos como CP1252: string UTF-8 aparece com "Ã§" no lugar de "ç"), o
+   * tamanho em bytes (Length) e cada byte com o caractere, o hexadecimal e o
+   * decimal ("ç [0xe7] [231]"), até MAX_BYTES_DETALHE.
+   */
+  private async detalheDeTexto(ref: number): Promise<DetalheTexto> {
+    const v = await this.dap.request("variables", { variablesReference: ref });
+    const itens = (v.body?.variables ?? []) as any[];
+    const valor = (nome: string) => itens.find((x) => x.name === nome)?.value;
+    const detalhe: DetalheTexto = { bruto: String(valor("Raw") ?? ""), tamanho: Number(valor("Length") ?? 0) };
+    const bloco = itens.find((x) => /\(ascii\)$/i.test(String(x.name)) && x.variablesReference > 0);
+    if (bloco) {
+      const b = await this.dap.request("variables", { variablesReference: bloco.variablesReference });
+      const bytes = ((b.body?.variables ?? []) as any[]).map((x) => String(x.value));
+      detalhe.bytes = bytes.slice(0, MAX_BYTES_DETALHE);
+      if (bytes.length > MAX_BYTES_DETALHE) detalhe.bytesOmitidos = bytes.length - MAX_BYTES_DETALHE;
+    }
+    return detalhe;
   }
 
   private async evaluateRaw(expression: string, frameId?: number): Promise<string> {
@@ -486,11 +528,17 @@ export class DebugSession {
     return r.success ? fmt(r.body ?? {}) : `ERRO ${r.message ?? ""}`.trim();
   }
 
-  async evaluate(expression: string): Promise<string> {
+  /** Avalia no frame do topo; com detalheTexto, resultado string traz também o `detalhe`. */
+  async evaluate(expression: string): Promise<{ resultado: string; detalhe?: DetalheTexto }> {
     this.touch();
     this.requireStopped();
     const frames = await this.frames();
-    return this.evaluateRaw(expression, frames[0]?.id);
+    if (!this.detalheTexto) return { resultado: await this.evaluateRaw(expression, frames[0]?.id) };
+    const r = await this.dap.request("evaluate", { expression, frameId: frames[0]?.id, context: "watch" }, 15000);
+    if (!r.success) return { resultado: `ERRO ${r.message ?? ""}`.trim() };
+    const resultado = fmt(r.body ?? {});
+    const ref = Number(r.body?.variablesReference ?? 0);
+    return r.body?.type === "C" && ref > 0 ? { resultado, detalhe: await this.detalheDeTexto(ref) } : { resultado };
   }
 
   async step(acao: "continuar" | "proxima" | "entrar" | "sair", timeoutSeg: number): Promise<Snapshot> {
@@ -765,6 +813,7 @@ export class DebugManager {
         isMultiSession: true,
         enableTableSync: true,
         ignoreFiles: [],
+        ...(opts.detalheTexto ? { extendFeatures: { charDetails: true } } : {}),
       },
       120000
     );

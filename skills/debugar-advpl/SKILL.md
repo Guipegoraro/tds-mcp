@@ -66,6 +66,8 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
      quando o usuário confirmar que o AppServer é exclusivo dele (nenhum outro
      desenvolvedor ou usuário conectado; "é o de desenvolvimento" não basta) e quem
      ajusta o appserver.ini (REFERENCE.md, "REST e jobs").
+   - Acentuação trocada (CP1252 x UTF-8, caractere estranho vindo de arquivo, banco ou
+     integração): `detalheTexto: true` no `tds_debug_start` (REFERENCE.md, "Acentuação").
    - Pedido com arquivo e linha, sem dizer que rotina executa aquele trecho: pergunte a
      rotina ou o menu de entrada; o `programa` é o ponto de entrada, não a função que
      contém a linha.

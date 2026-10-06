@@ -1442,6 +1442,7 @@ async function startDebug(args: {
   pastaDownloads?: string;
   webAgent?: boolean;
   porTdsRun?: boolean;
+  detalheTexto?: boolean;
 }) {
   if (args.modulo && args.modo !== "navegador") {
     throw new Error(
@@ -1486,6 +1487,7 @@ async function startDebug(args: {
       args.modo === "navegador" ? undefined : args.pastaDownloads ?? pastaDownloadsPadrao(),
     ...webAgentDaExecucao(args.webAgent ?? args.modo === "navegador"),
     porTdsRun: args.porTdsRun,
+    detalheTexto: args.detalheTexto,
   });
   return { ...started, avisos };
 }
@@ -1601,9 +1603,18 @@ server.registerTool(
             "aparece no tds_debug_wait, depois que a página abre); com ativo false o programa roda sem " +
             "agente e o caminho que depende dele não é testado"
         ),
+      detalheTexto: z
+        .boolean()
+        .optional()
+        .describe(
+          "Para acentuação trocada (CP1252 x UTF-8): tds_debug_variables (caminho até a string) e " +
+            "tds_debug_evaluate devolvem `detalhe` com o dado bruto, o tamanho em bytes e cada byte " +
+            "(\"ç [0xe7] [231]\"). Vale a sessão inteira (o depurador só aceita na abertura) e toda " +
+            "string aparece como expansível (+) nas variáveis"
+        ),
     },
   },
-  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes, pastaDownloads, webAgent }) => {
+  safe(async ({ programa, argumentos, modulo, breakpoints, modo, aguardarSeg, pastaFontes, pastaDownloads, webAgent, detalheTexto }) => {
     const mode = (modo ?? "headless") as DebugMode;
     const { session: s, breakpoints: bps, avisos } = await startDebug({
       programa,
@@ -1614,6 +1625,7 @@ server.registerTool(
       pastaFontes,
       pastaDownloads,
       webAgent,
+      detalheTexto,
     });
     const wait = aguardarSeg ?? (mode === "navegador" ? 0 : 60);
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
@@ -1728,7 +1740,8 @@ server.registerTool(
       "Local, Private, Public, Static e Table (tabelas abertas: cada alias com os campos do " +
       "registro posicionado). frame 0 = função atual; 1, 2... = chamadores (é assim que se vê " +
       "variável de outra função — tds_debug_evaluate só enxerga o frame 0). caminho desce em " +
-      "arrays, objetos JSON e tabelas: ['AITENS'], ['AITENS', 'AITENS[3]'], ['SA1'].",
+      "arrays, objetos JSON e tabelas: ['AITENS'], ['AITENS', 'AITENS[3]'], ['SA1']. Em sessão " +
+      "aberta com detalheTexto=true, caminho até uma string (['CNOME']) traz `detalhe` com os bytes.",
     inputSchema: {
       escopo: z.string().optional().default("Local"),
       frame: z.number().int().min(0).optional().default(0),
@@ -1749,12 +1762,15 @@ server.registerTool(
       "Avalia uma expressão AdvPL no ponto de parada (frame do topo). Aceita atribuição para " +
       "alterar o programa em execução (nTotal := 0), campos de tabela (SA1->A1_COD, " +
       "SA1->(RecNo())), funções (Len(aItens)) e table:ALIAS para a tabela inteira. ATENÇÃO: roda " +
-      "código de verdade no servidor — função com efeito colateral (RecLock, gravação) executa.",
+      "código de verdade no servidor — função com efeito colateral (RecLock, gravação) executa. " +
+      "String UTF-8 vem com o prefixo [UTF8] no resultado; em sessão aberta com detalheTexto=true, " +
+      "resultado string traz `detalhe` com os bytes. Acento escrito na expressão chega ao servidor " +
+      "como \"?\": monte o texto com Chr() (\"a\" + Chr(231) + Chr(227) + \"o\").",
     inputSchema: {
       expressao: z.string().min(1),
     },
   },
-  safe(async ({ expressao }) => jsonResult({ expressao, resultado: await debugManager.require().evaluate(expressao) }))
+  safe(async ({ expressao }) => jsonResult({ expressao, ...(await debugManager.require().evaluate(expressao)) }))
 );
 
 server.registerTool(

@@ -240,6 +240,20 @@ Verificado: breakpoint em função iniciada por `StartJob` para, com os parâmet
 recebidos visíveis. Não verificado: REST na porta multiprotocolo da 12.1.2510 (há
 relato aberto na TOTVS de breakpoint que não para nesse cenário).
 
+## Acentuação
+
+O valor de string UTF-8 já vem marcado com `[UTF8]` (ex.: `C [UTF8]"ação"`); sem a
+marca, a string está em CP1252, o padrão do AdvPL. Para ver os bytes, abra a sessão com
+`detalheTexto: true` (o depurador só aceita na abertura):
+
+- `tds_debug_variables` com `caminho` até a string (`['CNOME']`, `['AITENS', 'AITENS[2]']`)
+  e `tds_debug_evaluate` de expressão string trazem `detalhe`: `bruto` (os bytes lidos
+  como CP1252: UTF-8 aparece como `aÃ§Ã£o`), `tamanho` em bytes e `bytes`, um por
+  item no formato `ç [0xe7] [231]` (até 300; o resto conta em `bytesOmitidos`).
+- Toda string aparece com `(+)` nas variáveis da sessão; o valor não muda.
+- Acento escrito na expressão do `tds_debug_evaluate` chega ao servidor como `?`
+  (`"ação"` vira `"a??o"`): monte o texto com `Chr()`, `"a" + Chr(231) + Chr(227) + "o"`.
+
 ## Fontes temporários
 
 `tds_compile` com `temporario: true` registra o fonte em

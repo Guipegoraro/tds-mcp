@@ -102,8 +102,8 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST); `modulo` roda a rotina dentro do módulo pelo SIGABPM | **executa código** |
 | `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
 | `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
-| `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela | read-only |
-| `tds_debug_evaluate` | Avalia expressão no ponto de parada; `x := v` altera o programa | **executa código** |
+| `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela; bytes de string com `detalheTexto` | read-only |
+| `tds_debug_evaluate` | Avalia expressão no ponto de parada; `x := v` altera o programa; bytes de string com `detalheTexto` | **executa código** |
 | `tds_debug_watch` / `tds_debug_stop` | Expressões observadas a cada parada / encerra a sessão (a thread parada num breakpoint é encerrada ali) e o WebAgent dela; no modo navegador devolve `fecharAba` | depuração |
 
 ### Segurança operacional (leia antes de usar em cliente)
