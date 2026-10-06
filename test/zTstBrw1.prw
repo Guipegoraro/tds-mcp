@@ -4,6 +4,8 @@
 Fonte de teste do tds-mcp para operar grade no modo navegador: dialogo com
 FWBrowse sobre array, SetDoubleClick e um botao com a mesma acao. Cada
 acionamento passa por zBrwAcao, que conta e mostra na tela de onde veio.
+Roda dentro de um modulo (modulo no tds_debug_start): sem ambiente aberto
+a FWBrowse falha no Activate (variable does not exist CACESSO em VERSENHA).
 Inofensivo; nao grava nada.
 @type user function
 @author tds-mcp
