@@ -168,14 +168,24 @@ export class WebAgentInstance {
     }
   }
 
-  /** Encerra o agente e apaga a pasta temporária dele. */
+  /**
+   * Encerra o agente e apaga a pasta temporária dele depois que o processo
+   * sai (antes disso o Windows mantém o web-agent.log bloqueado).
+   */
   encerrar(): void {
-    this.kill();
-    try {
-      fs.rmSync(this.pastaTemp, { recursive: true, force: true });
-    } catch {
-      /* visualizador de PDF aberto pelo agente ainda usa a pasta; a varredura remove depois */
+    const apagar = () => {
+      try {
+        fs.rmSync(this.pastaTemp, { recursive: true, force: true });
+      } catch {
+        /* visualizador de PDF aberto pelo agente ainda usa a pasta; a varredura remove depois */
+      }
+    };
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) {
+      vivos.delete(this);
+      return apagar();
     }
+    this.proc.once("exit", apagar);
+    this.kill();
   }
 
   /**

@@ -217,6 +217,13 @@ export class HeadlessWebapp {
   }
 
   private onEvent(method: string, params: any): void {
+    // Com o Page habilitado, diálogo JavaScript espera resposta pelo CDP. O
+    // beforeunload do webapp seguraria a saída da página no close() e a
+    // thread do programa ficaria viva no AppServer.
+    if (method === "Page.javascriptDialogOpening") {
+      void this.send("Page.handleJavaScriptDialog", { accept: true });
+      return;
+    }
     if (!this.downloadDir) return;
     if (method === "Browser.downloadWillBegin") {
       const nome = String(params.suggestedFilename ?? "download");
