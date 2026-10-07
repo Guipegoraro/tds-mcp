@@ -1,10 +1,11 @@
-// Teste da escolha de servidor, do token salvo e das mensagens de autenticação — não precisa de AppServer.
+// Teste da escolha de servidor, do token salvo, das mensagens de autenticação, do TLS usado pela sessão e da
+// URL do webapp — não precisa de AppServer.
 // Uso: node test/session.test.mjs
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findServer, savedTokenFor, SessionManager } from "../dist/session.js";
+import { findServer, savedTokenFor, SessionManager, webappUrlFor } from "../dist/session.js";
 
 const cfg = {
   configurations: [
@@ -110,6 +111,15 @@ check("configuração sem ambiente registrado usa o token", savedTokenFor(cfg, d
     else process.env.TDS_MCP_SERVERS_JSON = antes;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// URL do webapp: config > endereço com esquema > TLS da sessão.
+{
+  const sessao = (secure, address = "srv") => ({ def: { name: "Dev", address, port: 1234 }, secure });
+  check("TLS na sessão: https", webappUrlFor(sessao(true)) === "https://srv:1234/webapp/");
+  check("sem TLS: http", webappUrlFor(sessao(false)) === "http://srv:1234/webapp/");
+  check("webappUrls do config vence, com a barra final", webappUrlFor(sessao(true), { Dev: "http://h:8080/webapp" }) === "http://h:8080/webapp/");
+  check("endereço com esquema é usado como está", webappUrlFor(sessao(false, "https://nuvem.x")) === "https://nuvem.x:1234/webapp/");
 }
 
 assert.equal(falhas, 0, `${falhas} caso(s) falharam`);

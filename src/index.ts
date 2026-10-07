@@ -43,7 +43,7 @@ import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding
 import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
   SessionManager,
-  type ActiveSession,
+  webappUrlFor,
   readServersJson,
   serversJsonPath,
   effectiveIncludes,
@@ -1369,18 +1369,6 @@ server.registerTool(
 
 const debugManager = new DebugManager(config.debugIdleMinutes ?? 10);
 
-/**
- * URL do webapp do servidor: config > http(s)://<endereço>:<porta>/webapp/
- * (multiprotocolo), com o TLS detectado na conexão da sessão.
- */
-function webappUrlFor(active: ActiveSession): string {
-  const { def } = active;
-  const configured = config.webappUrls?.[def.name];
-  if (configured) return configured.endsWith("/") ? configured : configured + "/";
-  if (/^https?:\/\//i.test(def.address)) return `${def.address}:${def.port}/webapp/`;
-  return `${active.secure ? "https" : "http"}://${def.address}:${def.port}/webapp/`;
-}
-
 /** "DD/MM/AAAA HH:MM:SS" do inspetor de objetos -> epoch ms (hora local). */
 function parseRpoDate(value: string): number | undefined {
   const m = /(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(value);
@@ -1481,7 +1469,7 @@ async function startDebug(args: {
     active,
     adapterPath,
     chromiumPath: args.modo === "navegador" ? undefined : resolveChromiumPath(config.chromiumPath),
-    webappUrl: webappUrlFor(active),
+    webappUrl: webappUrlFor(active, config.webappUrls),
     programa: inicial.programa,
     argumentos: inicial.argumentos,
     descricao: inicial.codigoModulo ? `${args.programa} (módulo ${inicial.codigoModulo})` : undefined,

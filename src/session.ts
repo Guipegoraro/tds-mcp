@@ -40,7 +40,7 @@ export interface ActiveSession {
   connectionToken: string;
   user: string;
   authMethod: "none" | "saved-token" | "credentials";
-  /** TLS detectado na conexão; o `secure` do servers.json pode estar desatualizado. */
+  /** TLS usado na conexão: o informado pela validação ou, quando ela não responde, o `secure` do servers.json. */
   secure: boolean;
   /** Conexão de monitor aberta sob demanda (ver SessionManager.monitorToken). */
   monitorToken?: string;
@@ -65,6 +65,18 @@ export function serversJsonPath(): string {
   }
 
   return path.join(os.homedir(), ".totvsls", "servers.json");
+}
+
+/**
+ * URL do webapp do servidor: webappUrls do config > http(s)://<endereço>:<porta>/webapp/
+ * (porta multiprotocolo), com o TLS da sessão (ActiveSession.secure).
+ */
+export function webappUrlFor(active: ActiveSession, webappUrls?: Record<string, string>): string {
+  const { def } = active;
+  const configured = webappUrls?.[def.name];
+  if (configured) return configured.endsWith("/") ? configured : configured + "/";
+  if (/^https?:\/\//i.test(def.address)) return `${def.address}:${def.port}/webapp/`;
+  return `${active.secure ? "https" : "http"}://${def.address}:${def.port}/webapp/`;
 }
 
 /** Código do tipo de servidor esperado pelo protocolo: Protheus/Logix/TotvsTec. */

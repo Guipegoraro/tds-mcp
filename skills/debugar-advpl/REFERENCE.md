@@ -337,7 +337,7 @@ em texto): ali não há print, e o relato diz isso.
 - **Chamada que passa de ~100 s** pode ir para segundo plano no cliente: use
   `timeoutSeg`/`aguardarSeg` até 100 e repita o `tds_debug_wait`.
 - **Webapp em porta própria**: o padrão é `http(s)://<endereço>:<porta>/webapp/` (porta
-  multiprotocolo; `https` quando a conexão detecta TLS, sem depender do `secure` gravado
+  multiprotocolo; `https` quando a validação do servidor detecta TLS, sem depender do `secure` gravado
   no servers.json); outra URL vai em `webappUrls` no `~/.tds-mcp/config.json`, por nome
   do servidor no servers.json do TDS:
   `"webappUrls": { "NomeDoServidor": "http://host:porta/webapp/" }`.
