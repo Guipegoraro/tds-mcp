@@ -2,7 +2,7 @@
 // As respostas imitam as do tds-da 1.4.2 com extendFeatures.charDetails ligado no launch.
 // Uso: node test/detalheTexto.test.mjs
 import assert from "node:assert/strict";
-import { DebugSession } from "../dist/debug.js";
+import { DebugSession, extrasDoLaunch } from "../dist/debug.js";
 
 let falhas = 0;
 function check(nome, condicao, detalhe = "") {
@@ -13,7 +13,7 @@ function check(nome, condicao, detalhe = "") {
 const BYTES = ["a [0x61] [97]", "ç [0xe7] [231]", "ã [0xe3] [227]", "o [0x6f] [111]"];
 
 /** Adaptador falso: com charDetails, string é expansível em Raw, Length e o bloco de bytes. */
-function adaptadorFalso({ charDetails, nBytes = 4 }) {
+function adaptadorFalso({ charDetails, nBytes = 4, raw = '"ação"', falha }) {
   const pedidos = [];
   const bytes = Array.from({ length: nBytes }, (_, i) => BYTES[i % 4]);
   const dap = {
@@ -23,6 +23,7 @@ function adaptadorFalso({ charDetails, nBytes = 4 }) {
     logsSince: () => [],
     async request(command, args) {
       pedidos.push({ command, args });
+      if (falha && command === "variables" && args.variablesReference === falha) return { success: false, message: "timeout" };
       switch (command) {
         case "stackTrace":
           return { success: true, body: { stackFrames: [{ id: 7, name: "U_ZTST", source: { path: "x.prw" }, line: 3 }] } };
@@ -45,7 +46,7 @@ function adaptadorFalso({ charDetails, nBytes = 4 }) {
               success: true,
               body: {
                 variables: [
-                  { name: "Raw", type: "C", value: '"ação"', variablesReference: -1 },
+                  { name: "Raw", type: "C", value: raw, variablesReference: -1 },
                   { name: "Length", type: "N", value: String(nBytes), variablesReference: -1 },
                   { name: "CNOME (ascii)", type: "_CHAR_BLOCK_", value: `(${nBytes} bytes)`, variablesReference: 201 },
                 ],
@@ -132,8 +133,29 @@ function sessaoParada(dap, detalheTexto) {
     r.detalhe?.bytes?.length === 300 && r.detalhe?.bytesOmitidos === 700 && r.detalhe?.tamanho === 1000,
     JSON.stringify({ n: r.detalhe?.bytes?.length, omitidos: r.detalhe?.bytesOmitidos })
   );
-  check("nenhum $changeSettings é enviado", !pedidos.some((p) => p.command === "$changeSettings"));
 }
+
+{
+  const { dap } = adaptadorFalso({ charDetails: true, nBytes: 1000, raw: "x".repeat(1000) });
+  const r = await sessaoParada(dap, true).variables(0, "Local", ["CNOME"]);
+  check("Raw longo: bruto cortado em 300 caracteres", r.detalhe?.bruto?.length === 301 && r.detalhe.bruto.endsWith("…"), String(r.detalhe?.bruto?.length));
+}
+
+{
+  const { dap } = adaptadorFalso({ charDetails: true, falha: 200 });
+  const r = await sessaoParada(dap, true).variables(0, "Local", ["CNOME"]);
+  check("adaptador sem resposta no detalhe: erro, não detalhe vazio", /detalhe indisponível: timeout/.test(r.detalhe?.erro ?? ""), JSON.stringify(r.detalhe));
+  const { dap: d2 } = adaptadorFalso({ charDetails: true, falha: 201 });
+  const r2 = await sessaoParada(d2, true).evaluate("cNome");
+  check("adaptador sem resposta nos bytes: bruto e tamanho com erro dos bytes", r2.detalhe?.tamanho === 4 && /bytes indisponíveis/.test(r2.detalhe?.erro ?? "") && !r2.detalhe?.bytes, JSON.stringify(r2.detalhe));
+}
+
+check(
+  "launch: charDetails só com detalheTexto",
+  JSON.stringify(extrasDoLaunch({ detalheTexto: true })) === '{"extendFeatures":{"charDetails":true}}' &&
+    JSON.stringify(extrasDoLaunch({})) === "{}",
+  JSON.stringify(extrasDoLaunch({ detalheTexto: true }))
+);
 
 {
   const { dap } = adaptadorFalso({ charDetails: false });

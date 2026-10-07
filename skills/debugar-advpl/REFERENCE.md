@@ -242,17 +242,21 @@ relato aberto na TOTVS de breakpoint que não para nesse cenário).
 
 ## Acentuação
 
-O valor de string UTF-8 já vem marcado com `[UTF8]` (ex.: `C [UTF8]"ação"`); sem a
-marca, a string está em CP1252, o padrão do AdvPL. Para ver os bytes, abra a sessão com
+String que o AppServer marcou como UTF-8 (ex.: retorno de `EncodeUTF8`) vem com `[UTF8]`
+(ex.: `C [UTF8]"ação"`). Bytes UTF-8 lidos de arquivo, banco ou HTTP podem vir sem a marca
+(não medido): para ter certeza, veja os bytes (UTF-8 de acento é `0xC3` seguido de
+`0x80`-`0xBF`). Para ver os bytes, abra a sessão com
 `detalheTexto: true` (o depurador só aceita na abertura):
 
 - `tds_debug_variables` com `caminho` até a string (`['CNOME']`, `['AITENS', 'AITENS[2]']`)
   e `tds_debug_evaluate` de expressão string trazem `detalhe`: `bruto` (os bytes lidos
   como CP1252: UTF-8 aparece como `aÃ§Ã£o`), `tamanho` em bytes e `bytes`, um por
-  item no formato `ç [0xe7] [231]` (até 300; o resto conta em `bytesOmitidos`).
+  item no formato `ç [0xe7] [231]` (até 300 em `bruto` e em `bytes`; o resto dos bytes
+  conta em `bytesOmitidos`). Se o depurador não responder, vem `erro` no `detalhe`.
 - Toda string aparece com `(+)` nas variáveis da sessão; o valor não muda.
-- Acento escrito na expressão do `tds_debug_evaluate` chega ao servidor como `?`
-  (`"ação"` vira `"a??o"`): monte o texto com `Chr()`, `"a" + Chr(231) + Chr(227) + "o"`.
+- Acento escrito em expressão (`tds_debug_evaluate`, `rastro` e watches; condição de
+  breakpoint não medida) chega ao servidor como `?` (`"ação"` vira `"a??o"`): monte o
+  texto com `Chr()`, `"a" + Chr(231) + Chr(227) + "o"`.
 
 ## Fontes temporários
 

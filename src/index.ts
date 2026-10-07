@@ -1508,7 +1508,8 @@ const breakpointSchema = z.object({
     .optional()
     .describe(
       "Ponto de rastro: ao passar na linha, avalia estas expressões (inclusive texto e funções), " +
-        "registra os valores em mensagens (nivel RASTRO) e continua sem parar. Ex.: [\"cArg\", \"Len(aItens)\"]"
+        "registra os valores em mensagens (nivel RASTRO) e continua sem parar. Ex.: [\"cArg\", \"Len(aItens)\"]. " +
+        "Acento escrito na expressão chega ao servidor como ?: use Chr()"
     ),
   contagem: z.string().optional().describe("Para só a partir da N-ésima passagem (ex.: '3')"),
 });
@@ -1631,7 +1632,13 @@ server.registerTool(
     const estado = wait > 0 ? await s.waitForStop(wait) : { estado: "executando" };
     const contexto = s.contextoIsolado;
     return jsonResult({
-      sessao: { programa: s.programa, servidor: s.servidor, ambiente: s.ambiente, modo: s.modo },
+      sessao: {
+        programa: s.programa,
+        servidor: s.servidor,
+        ambiente: s.ambiente,
+        modo: s.modo,
+        ...(s.detalheTexto ? { detalheTexto: true } : {}),
+      },
       ...(mode === "navegador"
         ? {
             abrirCom: { url: s.url, isolatedContext: contexto, ...(s.agente ? { initScript: SCRIPT_PORTA_AGENTE } : {}) },
@@ -1763,7 +1770,7 @@ server.registerTool(
       "alterar o programa em execução (nTotal := 0), campos de tabela (SA1->A1_COD, " +
       "SA1->(RecNo())), funções (Len(aItens)) e table:ALIAS para a tabela inteira. ATENÇÃO: roda " +
       "código de verdade no servidor — função com efeito colateral (RecLock, gravação) executa. " +
-      "String UTF-8 vem com o prefixo [UTF8] no resultado; em sessão aberta com detalheTexto=true, " +
+      "String marcada como UTF-8 pelo AppServer (ex.: EncodeUTF8) vem com o prefixo [UTF8]; em sessão aberta com detalheTexto=true, " +
       "resultado string traz `detalhe` com os bytes. Acento escrito na expressão chega ao servidor " +
       "como \"?\": monte o texto com Chr() (\"a\" + Chr(231) + Chr(227) + \"o\").",
     inputSchema: {
@@ -1780,7 +1787,8 @@ server.registerTool(
     description:
       "Mantém a lista de expressões observadas: cada parada (tds_debug_wait/step) devolve o valor " +
       "atual delas em `watches` e aponta em `alteradas` o que mudou. Use expressões sem efeito " +
-      "colateral (variáveis, campos, Len(...)).",
+      "colateral (variáveis, campos, Len(...)). Acento escrito na expressão chega ao servidor como ?: " +
+      "use Chr().",
     inputSchema: {
       adicionar: z.array(z.string()).optional().default([]),
       remover: z.array(z.string()).optional().default([]),

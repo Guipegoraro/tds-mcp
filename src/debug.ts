@@ -86,9 +86,16 @@ export interface DetalheTexto {
   tamanho: number;
   bytes?: string[];
   bytesOmitidos?: number;
+  /** O adaptador não respondeu ao pedido do detalhe. */
+  erro?: string;
 }
 
 const MAX_BYTES_DETALHE = 300;
+
+/** Argumentos do launch que dependem das opções da sessão. */
+export function extrasDoLaunch(opts: { detalheTexto?: boolean }): Record<string, unknown> {
+  return opts.detalheTexto ? { extendFeatures: { charDetails: true } } : {};
+}
 
 interface Snapshot {
   estado: "parado" | "executando" | "encerrado";
@@ -506,16 +513,22 @@ export class DebugSession {
    * Detalhe de uma string com o charDetails do adaptador: o dado bruto (Raw, os
    * bytes lidos como CP1252: string UTF-8 aparece com "Ã§" no lugar de "ç"), o
    * tamanho em bytes (Length) e cada byte com o caractere, o hexadecimal e o
-   * decimal ("ç [0xe7] [231]"), até MAX_BYTES_DETALHE.
+   * decimal ("ç [0xe7] [231]"); bruto e bytes até MAX_BYTES_DETALHE.
    */
   private async detalheDeTexto(ref: number): Promise<DetalheTexto> {
     const v = await this.dap.request("variables", { variablesReference: ref });
+    if (!v.success) return { bruto: "", tamanho: 0, erro: `detalhe indisponível: ${v.message ?? "sem resposta do depurador"}` };
     const itens = (v.body?.variables ?? []) as any[];
     const valor = (nome: string) => itens.find((x) => x.name === nome)?.value;
-    const detalhe: DetalheTexto = { bruto: String(valor("Raw") ?? ""), tamanho: Number(valor("Length") ?? 0) };
+    const raw = String(valor("Raw") ?? "");
+    const detalhe: DetalheTexto = {
+      bruto: raw.length > MAX_BYTES_DETALHE ? raw.slice(0, MAX_BYTES_DETALHE) + "…" : raw,
+      tamanho: Number(valor("Length") ?? 0),
+    };
     const bloco = itens.find((x) => /\(ascii\)$/i.test(String(x.name)) && x.variablesReference > 0);
     if (bloco) {
       const b = await this.dap.request("variables", { variablesReference: bloco.variablesReference });
+      if (!b.success) return { ...detalhe, erro: `bytes indisponíveis: ${b.message ?? "sem resposta do depurador"}` };
       const bytes = ((b.body?.variables ?? []) as any[]).map((x) => String(x.value));
       detalhe.bytes = bytes.slice(0, MAX_BYTES_DETALHE);
       if (bytes.length > MAX_BYTES_DETALHE) detalhe.bytesOmitidos = bytes.length - MAX_BYTES_DETALHE;
@@ -523,9 +536,16 @@ export class DebugSession {
     return detalhe;
   }
 
-  private async evaluateRaw(expression: string, frameId?: number): Promise<string> {
-    const r = await this.dap.request("evaluate", { expression, frameId, context: "watch" }, 15000);
+  private evaluateResposta(expression: string, frameId?: number) {
+    return this.dap.request("evaluate", { expression, frameId, context: "watch" }, 15000);
+  }
+
+  private static formatarAvaliacao(r: { success: boolean; message?: string; body?: any }): string {
     return r.success ? fmt(r.body ?? {}) : `ERRO ${r.message ?? ""}`.trim();
+  }
+
+  private async evaluateRaw(expression: string, frameId?: number): Promise<string> {
+    return DebugSession.formatarAvaliacao(await this.evaluateResposta(expression, frameId));
   }
 
   /** Avalia no frame do topo; com detalheTexto, resultado string traz também o `detalhe`. */
@@ -534,9 +554,9 @@ export class DebugSession {
     this.requireStopped();
     const frames = await this.frames();
     if (!this.detalheTexto) return { resultado: await this.evaluateRaw(expression, frames[0]?.id) };
-    const r = await this.dap.request("evaluate", { expression, frameId: frames[0]?.id, context: "watch" }, 15000);
-    if (!r.success) return { resultado: `ERRO ${r.message ?? ""}`.trim() };
-    const resultado = fmt(r.body ?? {});
+    const r = await this.evaluateResposta(expression, frames[0]?.id);
+    const resultado = DebugSession.formatarAvaliacao(r);
+    if (!r.success) return { resultado };
     const ref = Number(r.body?.variablesReference ?? 0);
     return r.body?.type === "C" && ref > 0 ? { resultado, detalhe: await this.detalheDeTexto(ref) } : { resultado };
   }
@@ -813,7 +833,7 @@ export class DebugManager {
         isMultiSession: true,
         enableTableSync: true,
         ignoreFiles: [],
-        ...(opts.detalheTexto ? { extendFeatures: { charDetails: true } } : {}),
+        ...extrasDoLaunch(opts),
       },
       120000
     );
