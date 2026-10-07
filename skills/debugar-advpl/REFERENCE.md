@@ -35,14 +35,17 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    `type_text`. Botão que não responde ao `click`: confirme no `take_snapshot` que é
    ele que está com foco (marcado `focused`) e só então `press_key` `Enter`. Em diálogo
    de sim/não o foco costuma estar em "Sim": nunca dê Enter sem essa conferência.
-   Grade (`FWBrowse`): `click` com `dblClick: true` numa célula dispara o
-   `SetDoubleClick` na linha clicada, em qualquer coluna, mesmo com o foco em outro
-   controle. Com a grade em foco, `press_key` `Enter` dispara o mesmo bloco na linha
+   Grade (`FWBrowse`, medido numa grade de array com o `SetDoubleClick` da grade, sem
+   coluna de marcação nem célula editável): `click` com `dblClick: true` numa célula
+   dispara o `SetDoubleClick` na linha clicada, em qualquer coluna, mesmo com o foco em
+   outro controle. Com a grade em foco, `press_key` `Enter` dispara o mesmo bloco na linha
    posicionada (as setas trocam a linha). Dois `click` seguidos só posicionam a linha, e
-   `dblclick` disparado por `evaluate_script` não chega ao AppServer. Duplo clique no
+   `dblclick` disparado por `evaluate_script` (MouseEvent na célula) não dispara o bloco. Duplo clique no
    cabeçalho também dispara o bloco, na linha que estiver posicionada, e mexe na
    ordenação: mire a célula. Para confirmar que o bloco rodou, ponha `rastro` na
-   primeira linha da função que ele chama.
+   primeira linha da função que ele chama. Grade de outro tipo que não responda: tente
+   `Enter` com a grade em foco ou o botão equivalente da tela antes de concluir que a
+   rotina está quebrada.
 4. `tds_debug_wait` acompanha: 10 a 20 s por chamada enquanto você opera as telas, até
    100 s quando só espera o breakpoint. `conectado: false` = nenhum webapp abriu esta
    sessão; com a página aberta há uns 30 s, confira a aba (passo 2). `conectado: true` com

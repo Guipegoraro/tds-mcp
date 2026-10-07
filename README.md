@@ -383,6 +383,10 @@ quando o token salvo pelo TDS expirou.
 O E2E compila `test/zTstMcp1.prw` (User Function inofensiva) e gera um patch. **Use apenas
 em ambiente de desenvolvimento descartável** e rode o cleanup depois.
 
+`test/zTstBrw1.prw` é fonte manual, sem e2e: uma FWBrowse com duplo clique, `Enter` e botão
+da mesma ação para operar grade no modo navegador. Compile como temporário e rode com
+`modulo` (fora de um módulo a FWBrowse não abre).
+
 ## Limitações
 
 - **Verificação de sintaxe**: no tds-ls 2.2.x o modo `syntaxOnly` da compilação não passa pelo
