@@ -87,13 +87,21 @@ try {
 } finally {
   await call("tds_debug_stop").catch(() => {});
   // Só os que estão no RPO: um nome ausente faria o tds_rpo_delete recusar a lista inteira.
-  const temp = await call("tds_rpo_temporarios").catch(() => ({ data: {} }));
+  const temp = await call("tds_rpo_temporarios").catch((e) => ({ isError: true, data: String(e) }));
   const noRpo = new Set((temp.data?.temporarios ?? []).filter((t) => t.noRpo).map((t) => t.fonte));
   const fontes = CASOS.map((c) => c[2]).filter((f) => noRpo.has(f));
-  const rm = fontes.length
-    ? await call("tds_rpo_delete", { fontes }).catch((e) => ({ isError: true, data: String(e) }))
-    : { isError: false, data: "nada no RPO" };
-  check("remove os temporários do RPO", !rm.isError, short(rm.data));
+  const rm = temp.isError
+    ? temp
+    : fontes.length
+      ? await call("tds_rpo_delete", { fontes }).catch((e) => ({ isError: true, data: String(e) }))
+      : { isError: false, data: "nada no RPO" };
+  // A prova é o RPO, não o registro de temporários.
+  const sobra = await call("tds_rpo_objects", { filtro: "ZTSTCLS" }).catch((e) => ({ isError: true, data: String(e) }));
+  check(
+    "remove os temporários do RPO",
+    !rm.isError && !sobra.isError && sobra.data?.totalFiltrado === 0,
+    short({ remocao: rm.data, noRpo: sobra.data?.objetos ?? sobra.data })
+  );
   await mcp.close();
 }
 
