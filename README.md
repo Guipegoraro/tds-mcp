@@ -228,7 +228,7 @@ parecer sucesso:
 
 | Nível | Onde aparece | Exemplo |
 |---|---|---|
-| **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40840` (token expirado) |
+| **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40910` (RPO em uso, o build não começa), `40840` (token expirado) |
 | **Fonte** | `resultados[].status` = `ERROR`/`FATAL` | erro de sintaxe (`returnCode -1`) |
 
 Uma falha de **build** acontece antes/fora da compilação individual: `resultados` pode vir
@@ -247,7 +247,10 @@ ignorados, a resposta traz o campo `aviso` dizendo isso. Confira `ignorados` ant
 afirmar que algo foi compilado.
 
 Valores de `returnCode` medidos em AppServer 7.00.240223P: `0` sucesso, `-1` erro de fonte
-(sintaxe / arquivo inexistente), `-300` sem acesso exclusivo ao RPO, `40840` token expirado.
+(sintaxe / arquivo inexistente), `-300` sem acesso exclusivo ao RPO, `40840` token expirado. O
+`40910` veio em AppServers de clientes na cloud e no local junto com "SYMTAB in use for StartBuild", "Error when
+loading Rpo DEFAULT", "Already building" ou o COMPILEERROR-300: outra compilação ou o RPO preso
+impediu o início do build (código sem documentação da TOTVS).
 
 ## Encoding: fontes precisam estar em CP1252
 

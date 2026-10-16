@@ -33,6 +33,12 @@ const casos = [
     esperado: false,
   },
   {
+    nome: "RPO em uso (40910): falha com orientação própria",
+    resposta: { returnCode: 40910, compileInfos: [] },
+    esperado: false,
+    exigeMotivo: /RPO estava em uso/,
+  },
+  {
     nome: "returnCode desconhecido diferente de zero",
     resposta: { returnCode: -999, compileInfos: [] },
     esperado: false,
@@ -129,6 +135,7 @@ for (const c of casos) {
   let ok = v.sucesso === c.esperado;
   if (c.exigeAviso && !v.aviso) ok = false;
   if (c.exigeInconclusivo && !v.inconclusivo) ok = false;
+  if (c.exigeMotivo && !c.exigeMotivo.test(v.falhaDeBuild ?? "")) ok = false;
   if (!ok) falhas++;
   console.log(
     `${ok ? "PASS" : "FAIL"}  ${c.nome}\n      sucesso=${v.sucesso} (esperado ${c.esperado}) returnCode=${v.returnCode}` +

@@ -33,6 +33,17 @@ export const RETURN_CODE_HINTS: Record<number, string> = {
   40840:
     "Token de autorização de compilação expirado. Renove o token/chave de compilação " +
     "(no TDS: RPO token / compile key) e tente novamente.",
+  // A TOTVS não documenta o 40910; o texto resume as mensagens que vieram com ele no
+  // log do servidor: "SYMTAB in use for StartBuild", "Error when loading Rpo DEFAULT",
+  // "Already building" e COMPILEERROR-300 "Failed to open repository".
+  40910:
+    "returnCode 40910: o servidor não começou o build porque o RPO estava em uso (outra " +
+    "compilação ou aplicação de patch em andamento, ou o RPO preso por outro processo). Nas " +
+    "ocorrências vistas nada foi gravado; para ter certeza, confira com tds_rpo_objects. A " +
+    "mensagem do servidor está no tds_server_log. Repita uma vez depois de alguns " +
+    "segundos; se voltar, não insista: num AppServer compartilhado avise o usuário (alguém " +
+    "compila ou o RPO está preso; BuildKillUsers=1 e um AppServer por RPO evitam), e num " +
+    "AppServer local reiniciá-lo solta o RPO.",
 };
 
 export interface CompileVerdict {
