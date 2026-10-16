@@ -27,6 +27,7 @@ import { resolveDebugAdapterPath } from "./dap.js";
 import { resolveChromiumPath } from "./webapp.js";
 import { resolveWebAgentPath, SCRIPT_PORTA_AGENTE } from "./webagent.js";
 import { lintFiles } from "./linter.js";
+import { gerarPpo } from "./ppo.js";
 import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
@@ -531,39 +532,35 @@ server.registerTool(
   {
     title: "Gerar PPO (fonte pré-processado)",
     description:
-      "Retorna o fonte após o pré-processador (resolução de #include/#define). " +
-      "Útil para depurar problemas de defines e includes. GRAVA NO RPO: recompila o fonte no " +
-      "servidor para isso, e a versão local do arquivo substitui a que estiver no RPO; peça licença " +
-      "como numa compilação." +
-      RECUSA_NA_DEPURACAO,
+      "Retorna o fonte depois do pré-processador (#include, #define, #xtranslate resolvidos), pelo " +
+      "advpls appre local: não usa o AppServer, não precisa de servidor conectado e não grava nada. " +
+      "Use quando a compilação acusa erro numa linha que parece certa: o PPO mostra o que o " +
+      "compilador recebe (ex.: cFilial trocado por xFilial(Alias()) pelo protheus.ch). Usa as pastas de " +
+      "include do servidor conectado (ou as globais do servers.json) e a pasta do próprio fonte. Erro " +
+      "do pré-processador (include não encontrado, #ifdef sem #endif) vem em `erros` com a linha; " +
+      "erro de sintaxe fora do pré-processador não é acusado aqui: PPO gerado não quer dizer que compila.",
     inputSchema: {
       arquivo: z.string().describe("Caminho do fonte"),
-      aceitarMisto: ACEITAR_MISTO_SCHEMA,
     },
-    annotations: { readOnlyHint: false, destructiveHint: false },
+    annotations: { readOnlyHint: true },
   },
-  safe(async ({ arquivo, aceitarMisto }) => {
-    recusarDuranteDepuracao("gerar o PPO");
-    const options = defaultCompileOptions();
-    options.recompile = true;
-    options.returnPpo = true;
-    const { verdict } = await runCompilation([arquivo], options, aceitarMisto ?? false);
-    const ppo = verdict.infos.find((i) => i.status === "APPRE");
-    if (!ppo) {
-      return jsonFailure({
-        sucesso: false,
-        returnCode: verdict.returnCode,
-        ...(verdict.falhaDeBuild ? { falhaDeBuild: verdict.falhaDeBuild } : {}),
-        ...(verdict.inconclusivo ? { inconclusivo: verdict.inconclusivo } : {}),
-        mensagem: "PPO não retornado; veja resultados",
-        resultados: verdict.infos.map((i) => ({
-          status: i.status,
-          arquivo: i.filePath,
-          mensagem: i.message,
-        })),
-      });
+  safe(async ({ arquivo }) => {
+    if (!fs.statSync(arquivo, { throwIfNoEntry: false })?.isFile()) {
+      throw new Error(`Fonte não encontrado: ${arquivo}`);
     }
-    return { content: [{ type: "text" as const, text: ppo.detail }] };
+    const cfg = readServersJson();
+    const active = session?.current;
+    const configured = active ? effectiveIncludes(cfg, active.def) : (cfg.includes ?? []).filter((i) => !!i);
+    const includes = configured.filter((d) => fs.statSync(d, { throwIfNoEntry: false })?.isDirectory());
+    if (includes.length === 0) {
+      throw new Error(
+        `Nenhuma pasta de includes do servers.json existe nesta máquina: ${configured.join(", ") || "(nenhuma)"}. ` +
+          `Corrija as pastas de include do servidor no TDS.`
+      );
+    }
+    const { ppo, erros } = await gerarPpo(advplsPath ?? resolveAdvplsPath(config.advplsPath), arquivo, includes);
+    if (!ppo) return jsonFailure({ sucesso: false, arquivo: path.resolve(arquivo), erros });
+    return { content: [{ type: "text" as const, text: ppo }] };
   })
 );
 

@@ -88,9 +88,9 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
      versão do RPO (aí sem breakpoint pelo arquivo local alterado).
    - `avisos` de fonte divergente depois do start: `tds_debug_stop`, compile (com
      licença para aquele fonte) e inicie de novo. Com a sessão aberta (ou um `tds_run`
-     em andamento), `tds_compile`, `tds_generate_ppo`, `tds_patch_generate`,
-     `tds_patch_validate`, `tds_patch_apply` e `tds_rpo_delete` são recusados (`tds_patch_info`
-     e `tds_rpo_info` seguem livres). O
+     em andamento), `tds_compile`, `tds_patch_generate`,
+     `tds_patch_validate`, `tds_patch_apply` e `tds_rpo_delete` são recusados (`tds_patch_info`,
+     `tds_rpo_info` e `tds_generate_ppo` seguem livres). O
      aviso compara datas de arquivo. Quando ele disse "arquivo local mais novo" e o
      `tds_compile` devolveu `SKIPPED`, o conteúdo é o mesmo do RPO (a data mudou por um
      checkout do git, por exemplo) e o aviso pode ser ignorado. Quando disse "RPO mais

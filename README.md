@@ -81,7 +81,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada. Devolve `prefixoWrapper` (início do nome de wrapper de teste, único por pessoa e máquina) e `maquinaLocal` (o computador das suas execuções no monitor) | sessão |
 | `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `temporario` registra o fonte para remoção posterior | **grava no RPO** |
 | `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
-| `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`); recompila o fonte no servidor | **grava no RPO** |
+| `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`/`#xtranslate`) pelo advpls appre local, sem AppServer | nenhum |
 | `tds_rpo_objects` | Lista objetos do RPO (filtro + datas) | read-only |
 | `tds_rpo_temporarios` | Lista os fontes compilados com `temporario` e se ainda estão no RPO | read-only |
 | `tds_rpo_delete` | Remove do RPO os temporários registrados; outro fonte só com `foraDoRegistro` a pedido do usuário; objeto oficial TOTVS sempre recusado | **remove do RPO** |
@@ -108,7 +108,7 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 
 ### Segurança operacional (leia antes de usar em cliente)
 
-`tds_compile`, `tds_generate_ppo`, `tds_patch_generate`, `tds_patch_apply` e `tds_rpo_delete` **alteram o RPO de um servidor real**, e as
+`tds_compile`, `tds_patch_generate`, `tds_patch_apply` e `tds_rpo_delete` **alteram o RPO de um servidor real**, e as
 tools de ação do monitor (`tds_monitor_*`) **afetam usuários conectados**, e
 `tds_run`, `tds_debug_start` e `tds_debug_evaluate` **executam código no servidor**.
 Recomendação forte: configure seu cliente MCP para **sempre pedir confirmação** nelas.
@@ -119,7 +119,6 @@ No Claude Code, em `~/.claude/settings.json`:
   "permissions": {
     "ask": [
       "mcp__tds__tds_compile",
-      "mcp__tds__tds_generate_ppo",
       "mcp__tds__tds_patch_generate",
       "mcp__tds__tds_patch_apply",
       "mcp__tds__tds_rpo_delete",
@@ -135,7 +134,7 @@ No Claude Code, em `~/.claude/settings.json`:
 ```
 
 Enquanto há sessão de depuração deste tds-mcp aberta (`tds_debug_start`) ou `tds_run` em
-andamento, compilação, PPO, geração, validação e aplicação de patch e remoção do RPO são
+andamento, compilação, geração, validação e aplicação de patch e remoção do RPO são
 recusadas: encerre com `tds_debug_stop` ou espere o `tds_run` terminar. Sessão de outro
 tds-mcp ou do TDS no mesmo AppServer não é vista.
 
@@ -372,7 +371,7 @@ node test/e2e-debug-bordas.mjs <srv> [amb]     # inatividade no navegador, downl
 node test/e2e-webagent.mjs <srv> [amb]         # WebAgent no navegador e no headless (GetTempPath(.T.) da máquina), recusa e ausência do agente (depois do e2e-debug)
 node test/e2e-monitor-acoes.mjs <srv> [amb]    # COMPILA test/zTstDbg1.prw; mensagem, app kill e kill na thread do teste
 node test/e2e-rpo-delete.mjs <srv> [amb]       # COMPILA e REMOVE do RPO dois fontes de teste; registro de temporários
-node test/e2e-recusa-depuracao.mjs <srv> [amb] # COMPILA test/zTstDbg1.prw; compilação, PPO, patch e remoção recusados com a depuração ativa e liberados depois (depois do e2e-debug)
+node test/e2e-recusa-depuracao.mjs <srv> [amb] # COMPILA test/zTstDbg1.prw; compilação, patch e remoção recusados com a depuração ativa e liberados depois, PPO livre (depois do e2e-debug)
 
 node test/e2e-mcp.mjs <servidor> [ambiente]    # E2E: COMPILA um fonte de teste no RPO
 node test/cleanup.mjs <servidor> [ambiente]    # remove o fonte de teste do RPO

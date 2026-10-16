@@ -1,5 +1,5 @@
-// E2E da recusa de compilação, PPO, patch e remoção do RPO enquanto um programa roda sob o
-// depurador. Exige test/zTstDbg1.prw compilado (rode antes o e2e-debug). Compila o
+// E2E da recusa de compilação, patch e remoção do RPO enquanto um programa roda sob o
+// depurador; o PPO (appre local, sem RPO) continua livre. Exige test/zTstDbg1.prw compilado (rode antes o e2e-debug). Compila o
 // zTstDbg1 de novo (fora da depuração), o que derruba sessões de usuário no servidor
 // com BUILDKILLUSERS=1.
 // Uso: node test/e2e-recusa-depuracao.mjs <servidor> [ambiente]
@@ -56,7 +56,6 @@ const recusada = (r) => r.isError && /Recusado durante a depuração/.test(erro(
 // Cada operação com o resultado esperado fora da depuração: segue até o erro (ou o sucesso) dela.
 const operacoes = [
   ["tds_compile", { arquivos: [SRC] }, (r) => !r.isError || /COMPILEERROR-300/.test(erro(r))],
-  ["tds_generate_ppo", { arquivo: SRC }, (r) => !r.isError],
   [
     "tds_patch_generate",
     // Fonte ausente do RPO: a geração para antes de gravar o patch.
@@ -93,6 +92,8 @@ try {
       short(r.data)
     );
   }
+  const ppo = await call("tds_generate_ppo", { arquivo: SRC });
+  check("tds_generate_ppo livre com a sessão aberta (appre local, não toca o RPO)", !ppo.isError, short(ppo.data));
   const ainda = await call("tds_debug_evaluate", { expressao: "nTotal" });
   check("a sessão segue de pé depois das recusas", !ainda.isError, short(ainda.data));
   await call("tds_debug_stop");
