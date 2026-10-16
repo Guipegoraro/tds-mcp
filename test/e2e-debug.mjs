@@ -41,6 +41,10 @@ const transport = new StdioClientTransport({
 });
 const mcp = new Client({ name: "e2e-debug", version: "0.0.1" });
 await mcp.connect(transport);
+// Logs do debugAdapter e perfis do Chromium levam o pid do tds-mcp que os criou; a
+// conferência de sobras olha só os dos processos deste teste (outras sessões usam a
+// mesma pasta temporária).
+const pidsDoTeste = [transport.pid];
 
 async function call(name, args = {}) {
   const r = await mcp.callTool({ name, arguments: args }, undefined, { timeout: 600000 });
@@ -314,9 +318,12 @@ try {
 
   // --- dois processos do tds-mcp (duas sessões do Claude) executando ao mesmo tempo
   const outro = new Client({ name: "e2e-debug-2", version: "0.0.1" });
-  await outro.connect(
-    new StdioClientTransport({ command: process.execPath, args: [path.join(here, "..", "dist", "index.js")] })
-  );
+  const transportOutro = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(here, "..", "dist", "index.js")],
+  });
+  await outro.connect(transportOutro);
+  pidsDoTeste.push(transportOutro.pid);
   try {
     const callOutro = async (name, args = {}) => {
       const r = await outro.callTool({ name, arguments: args }, undefined, { timeout: 600000 });
@@ -350,8 +357,10 @@ try {
   // --- sem sobras locais: logs do debugAdapter (têm o token) e perfis do Chromium
   await new Promise((r) => setTimeout(r, 2000));
   const tmp = path.join(os.tmpdir(), "tds-mcp");
+  const doTeste = (n) =>
+    pidsDoTeste.some((pid) => n.startsWith(`debugAdapter-${pid}-`) || n.startsWith(`chromium-profile-${pid}-`));
   const recentes = (fs.existsSync(tmp) ? fs.readdirSync(tmp) : []).filter(
-    (n) => /^(debugAdapter-|chromium-profile-)/.test(n) && fs.statSync(path.join(tmp, n)).mtimeMs > inicioE2e
+    (n) => doTeste(n) && fs.statSync(path.join(tmp, n)).mtimeMs > inicioE2e
   );
   check("nenhum log de debugAdapter nem perfil de Chromium sobrando", recentes.length === 0, recentes.join(", "));
 } finally {

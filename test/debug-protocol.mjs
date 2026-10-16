@@ -7,11 +7,12 @@
 // Uso: node test/debug-protocol.mjs [host] [porta]
 import { spawn } from "node:child_process";
 import { resolveAdvplsPath } from "../dist/advpls.js";
+import { loadConfig } from "../dist/config.js";
 
 const host = process.argv[2] ?? "localhost";
 const port = Number(process.argv[3] ?? 1234);
 
-const advplsPath = resolveAdvplsPath();
+const advplsPath = resolveAdvplsPath(loadConfig().advplsPath);
 const proc = spawn(advplsPath, ["language-server", "--notification-level=none"], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,

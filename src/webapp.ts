@@ -141,7 +141,8 @@ export class HeadlessWebapp {
    */
   static async open(chromiumPath: string, url: string, baseDir: string, downloadDir?: string): Promise<HeadlessWebapp> {
     fs.mkdirSync(baseDir, { recursive: true });
-    const profileDir = fs.mkdtempSync(path.join(baseDir, "chromium-profile-"));
+    // O pid no nome, como no log do adaptador, diz de qual tds-mcp é cada perfil.
+    const profileDir = fs.mkdtempSync(path.join(baseDir, `chromium-profile-${process.pid}-`));
     const portFile = path.join(profileDir, "DevToolsActivePort");
     const proc = spawn(
       chromiumPath,

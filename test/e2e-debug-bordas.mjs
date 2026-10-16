@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAdvplsPath } from "../dist/advpls.js";
 import { serversJsonPath } from "../dist/session.js";
+import { loadConfig } from "../dist/config.js";
 
 const serverName = process.argv[2] ?? process.env.TDS_MCP_TEST_SERVER;
 const environment = process.argv[3] ?? process.env.TDS_MCP_TEST_ENV;
@@ -37,7 +38,8 @@ await mcp.connect(
       ...process.env,
       USERPROFILE: home,
       HOME: home,
-      TDS_MCP_ADVPLS: resolveAdvplsPath(),
+      // O HOME falso esconde o config.json; o advpls continua o do config do usuário.
+      TDS_MCP_ADVPLS: resolveAdvplsPath(loadConfig().advplsPath),
       TDS_MCP_SERVERS_JSON: serversJsonPath(),
     },
   })

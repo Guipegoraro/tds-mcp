@@ -6,10 +6,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { lintFiles } from "../dist/linter.js";
 import { resolveAdvplsPath } from "../dist/advpls.js";
+import { loadConfig } from "../dist/config.js";
 
+// Mesmo advpls que o tds-mcp usa: o advplsPath do config, quando houver.
 let advpls;
 try {
-  advpls = resolveAdvplsPath();
+  advpls = resolveAdvplsPath(loadConfig().advplsPath);
 } catch (e) {
   console.log(`SKIP  advpls não encontrado (${e.message})`);
   process.exit(0);
