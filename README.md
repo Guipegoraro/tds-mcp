@@ -166,6 +166,20 @@ serial, volta vazio). O Chromium headless do tds-mcp faz o mesmo sozinho. `tds_d
 AppServer o programa que não estava parado num breakpoint. O agente da sessão encerra quando a
 página sai do programa ou a aba fecha.
 
+Dois argumentos no MCP chrome-devtools ajudam o modo navegador:
+
+```json
+"args": ["<...>/chrome-devtools-mcp.js", "--isolated",
+         "--chromeArg=--disable-features=LocalNetworkAccessChecks"]
+```
+
+- `--isolated`: cada sessão do Claude sobe o próprio Chromium com perfil temporário. Sem ele, todas
+  usam o mesmo perfil, e a segunda sessão recebe "The browser is already running" até a primeira
+  fechar o navegador.
+- `--disable-features=LocalNetworkAccessChecks`: o webapp de um AppServer remoto chama o WebAgent
+  em 127.0.0.1, e o Chromium pede ao usuário a permissão "Acessar outros apps e serviços neste
+  dispositivo" a cada servidor. O Chromium headless do tds-mcp já sobe com essa flag.
+
 Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABPM dentro do módulo,
 com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela
 pede login e confirma os diálogos de entrada do módulo; a rotina roda sem argumentos. Sem `modulo`,

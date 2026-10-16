@@ -281,6 +281,10 @@ em texto): ali não há print, e o relato diz isso.
   abriu o ambiente. A causa costuma ser o banco fora do ar (TOPConnect/DBAccess erro -35,
   ex.: SQL Server sem memória) ou o RPO travado, e o motivo exato está no console.log do
   AppServer. Avise o usuário; repetir não resolve.
+- **chrome-devtools responde "The browser is already running for ...chrome-profile"**: outra
+  sessão do Claude está com o navegador do perfil compartilhado. O MCP chrome-devtools
+  precisa do argumento `--isolated` (README do tds-mcp); avise o usuário, que reconecta o
+  MCP pelo `/mcp`. Enquanto isso, use o modo headless.
 - **Formulário "Parâmetros Iniciais" no lugar do programa**: a URL foi aberta fora do
   contexto isolado. Feche a aba e abra de novo com `new_page` + `isolatedContext`.
 - **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes`
