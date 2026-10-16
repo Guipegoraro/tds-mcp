@@ -379,7 +379,8 @@ try {
     check(
       "dois processos do tds-mcp: as duas execuções simultâneas concluem",
       p1.data?.resultado === "concluido" && p2.data?.resultado === "concluido",
-      short([p1.data?.resultado ?? p1.data?.erro, p2.data?.resultado ?? p2.data?.erro])
+      // Na falha, a tela diz se o programa nem abriu (formulário inicial) ou parou num diálogo.
+      short([p1, p2].map((p) => ({ resultado: p.data?.resultado ?? p.data?.erro, tela: p.data?.tela?.slice(0, 150) })))
     );
   } finally {
     await outro.close().catch(() => {});

@@ -361,6 +361,11 @@ export class DebugSession {
     if (ev.event === "terminated") {
       this.ended = true;
       this.threadId = undefined;
+      // O fim do programa pode chegar antes da volta do laço que lê a tela de
+      // erro; lida aqui, ela não se perde quando o navegador fecha.
+      if (this.browser && !this.errorCapture) {
+        this.errorCapture = await this.browser.captureErrorDialog().catch(() => undefined);
+      }
       // O arquivo que o programa mandou ao navegador pode ainda estar chegando.
       await this.browser?.aguardarDownloads(20000);
       void this.browser?.close();

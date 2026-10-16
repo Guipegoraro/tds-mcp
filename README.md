@@ -347,10 +347,11 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 - `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
   encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`). Para o navegador headless,
   o `chrome-headless-shell` do [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
-  gasta uns 100 MB a menos por execução que o Chromium e abre com metade da CPU, sem perder nada
-  nos testes (webapp, WebAgent, downloads e PDF do FWMSPrinter). Ele não tem janela: serve para o
-  `chromiumPath`, não para o chrome-devtools do modo navegador. O binário vem sem assinatura
-  digital e não se atualiza sozinho.
+  gasta uns 100 MB a menos por execução que o Chromium e abre com metade da CPU, e passou nos testes
+  de webapp, WebAgent, downloads e PDF do FWMSPrinter. Em observação: na bateria completa, dois
+  `tds_run` simultâneos deram tela vazia 2 vezes em 21 rodadas com ele, e nenhuma com o Chromium.
+  Ele não tem janela: serve para o `chromiumPath`, não para o chrome-devtools do modo navegador. O
+  binário vem sem assinatura digital e não se atualiza sozinho.
 - `webAgentPath` — WebAgent compatível com o webapp dos servidores, quando não for o instalado
   (também `TDS_MCP_WEBAGENT`)
 
