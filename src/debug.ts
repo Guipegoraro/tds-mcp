@@ -822,6 +822,7 @@ export class DebugManager {
         cwb: opts.pastaFontes,
         workspaceFolders: [opts.pastaFontes],
         environment: opts.active.environment,
+        // Tipo de servidor do TDS: 1 = Protheus (2 = Logix quebra o launch com GETADV97).
         environmentType: 1,
         token: opts.active.connectionToken,
         smartclientUrl: opts.webappUrl,

@@ -5,7 +5,7 @@ Static cStatico := "valor estatico"
 /*/{Protheus.doc} zTstDbg1
 Fonte de teste do E2E de depuracao do tds-mcp: locais, privadas, estatica,
 array, JSON e chamada aninhada. Inofensivo; nao grava nada.
-@type user function
+@type function
 @author tds-mcp
 @since 02/10/2026
 @param cArg, character, texto qualquer (padrao "sem argumento")
@@ -33,7 +33,7 @@ Return nTotal
 
 /*/{Protheus.doc} zTstSoma
 Dobra o valor e incrementa a privada nPriv do chamador.
-@type static function
+@type function
 @author tds-mcp
 @since 02/10/2026
 @param nValor, numeric, valor a dobrar
@@ -46,7 +46,7 @@ Return nDobro
 
 /*/{Protheus.doc} zTstDbgE
 Gera erro de execucao proposital (variavel inexistente) para o E2E.
-@type user function
+@type function
 @author tds-mcp
 @since 02/10/2026
 @return numeric, nunca retorna: a linha do erro interrompe a execucao
@@ -58,7 +58,7 @@ Return nA
 
 /*/{Protheus.doc} zTstDbgT
 Abre um dialogo de confirmacao e espera resposta, para o E2E ler a tela.
-@type user function
+@type function
 @author tds-mcp
 @since 05/10/2026
 @return logical, resposta do dialogo
@@ -69,7 +69,7 @@ Return lSim
 
 /*/{Protheus.doc} zTstDbgD
 Grava um arquivo no servidor e o envia ao navegador, para o E2E de downloads.
-@type user function
+@type function
 @author tds-mcp
 @since 05/10/2026
 @return numeric, retorno do CpyS2TW (0 = enviado)
@@ -82,7 +82,7 @@ Return CpyS2TW(cArq, .T.)
 /*/{Protheus.doc} zTstDbgW
 Le a pasta temporaria da estacao, que so vem da maquina quando o AppServer
 registrou o WebAgent da sessao, para o E2E do WebAgent.
-@type user function
+@type function
 @author tds-mcp
 @since 06/10/2026
 @return character, pasta temporaria devolvida por GetTempPath(.T.)

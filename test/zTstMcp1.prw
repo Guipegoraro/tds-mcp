@@ -5,7 +5,7 @@
 Fonte de teste do tds-mcp (compilacao + geracao de patch via MCP).
 Pode ser removido do RPO com seguranca.
 
-@type user function
+@type function
 @author tds-mcp
 @since 19/07/2026
 @return character, a mensagem "tds-mcp ok"

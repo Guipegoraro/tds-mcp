@@ -7,7 +7,7 @@ acionamento passa por zBrwAcao, que conta e mostra na tela de onde veio.
 Roda dentro de um modulo (modulo no tds_debug_start): sem ambiente aberto
 a FWBrowse falha no Activate (variable does not exist CACESSO em VERSENHA).
 Inofensivo; nao grava nada.
-@type user function
+@type function
 @author tds-mcp
 @since 06/10/2026
 @return numeric, quantidade de acionamentos ate o dialogo fechar
@@ -60,7 +60,7 @@ Return nTstBrwQtd
 
 /*/{Protheus.doc} zBrwAcao
 Conta o acionamento e mostra a origem e a linha na tela.
-@type static function
+@type function
 @author tds-mcp
 @since 06/10/2026
 @param cOrigem, character, "duplo clique" ou "botao"

@@ -56,7 +56,7 @@ Return ::nValor * 2
 
 /*/{Protheus.doc} U_zTstCls1
 Cria o objeto e chama Somar(5).
-@type user function
+@type function
 @author tds-mcp
 @since 06/10/2026
 @return numeric, 15
