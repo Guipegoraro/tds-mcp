@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import {
+  CancellationTokenSource,
   createMessageConnection,
   StreamMessageReader,
   StreamMessageWriter,
@@ -158,13 +159,40 @@ export interface ServerPermissionsResult {
 
 export const CONN_TYPE = { DEBUGGER: 3, MONITOR: 13 } as const;
 
-/** Requests que podem levar minutos (pasta grande, patch grande): prazo de 30 min; os demais, 5 min. */
+/** Requests que podem levar minutos (pasta grande, patch grande): prazo de 30 min. */
 const LONG_REQUESTS = new Set([
   "$totvsserver/compilation",
   "$totvsserver/patchGenerate",
   "$totvsserver/patchApply",
   "$totvsserver/patchInfo",
 ]);
+
+/** Remoção de fonte do RPO (é um build): prazo de 5 min. */
+const MEDIUM_REQUESTS = new Set(["$totvsserver/deletePrograms"]);
+
+/** Requests que gravam no RPO: no prazo vencido, a gravação pode continuar no servidor. */
+const WRITE_REQUESTS = new Set(["$totvsserver/compilation", "$totvsserver/patchApply", "$totvsserver/deletePrograms"]);
+
+/**
+ * Prazo das demais requests (validação, conexão, autenticação, consultas): 90 s.
+ * Fica abaixo dos 120 s em que o Claude Code passa a tool para segundo plano.
+ */
+export const SHORT_TIMEOUT_MS = 90_000;
+
+/** Prazo da request: 30 min para build e patch, 5 min para remover fonte, 90 s para o resto. */
+export function requestTimeoutMs(method: string): number {
+  if (LONG_REQUESTS.has(method)) return 30 * 60_000;
+  if (MEDIUM_REQUESTS.has(method)) return 5 * 60_000;
+  return SHORT_TIMEOUT_MS;
+}
+
+/**
+ * O advpls escreve a porta com separador de milhar nas mensagens de erro
+ * ("Server: host:1.614 [serverName]"); devolve a porta como número inteiro.
+ */
+export function portaSemSeparador(message: string): string {
+  return message.replace(/(Server: \S+?:)(\d{1,2})\.(\d{3})(?!\d)/g, "$1$2$3");
+}
 
 // ---------------------------------------------------------------------------
 // Localização do binário
@@ -330,7 +358,7 @@ export class AdvplsClient {
   private pushLog(message?: string): void {
     if (!message) return;
     this.logCount++;
-    this.serverLog.push(message);
+    this.serverLog.push(portaSemSeparador(message));
     if (this.serverLog.length > 200) this.serverLog.shift();
   }
 
@@ -346,27 +374,40 @@ export class AdvplsClient {
 
   request<T>(method: string, params: unknown): Promise<T> {
     if (this.disposed) return Promise.reject(new Error(this.exitReason));
+    const timeoutMs = requestTimeoutMs(method);
+    // A validação de patch vai pelo patchApply com isValidOnly e não grava.
+    const validacao = !!(params as { patchApplyInfo?: { isValidOnly?: boolean } })?.patchApplyInfo?.isValidOnly;
+    const grava = WRITE_REQUESTS.has(method) && !validacao;
     const longo = LONG_REQUESTS.has(method);
-    const timeoutMs = longo ? 30 * 60_000 : 5 * 60_000;
+    const prazo = timeoutMs % 60_000 === 0 ? `${timeoutMs / 60_000} min` : `${timeoutMs / 1000} s`;
+    // Cancelar a request vencida avisa o advpls de que ninguém espera mais a resposta.
+    const cancel = new CancellationTokenSource();
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () =>
-          reject(
-            new Error(
-              `${method} sem resposta do advpls em ${timeoutMs / 60_000} min.` +
-                (longo
-                  ? " A operação pode continuar no servidor e ainda gravar no RPO: confira com " +
-                    "tds_rpo_objects antes de repetir."
-                  : "")
-            )
-          ),
-        timeoutMs
-      );
+      timer = setTimeout(() => {
+        cancel.cancel();
+        reject(
+          new Error(
+            `${method} sem resposta do advpls em ${prazo}.` +
+              (grava
+                ? " A operação pode continuar no servidor e ainda gravar no RPO: confira com " +
+                  "tds_rpo_objects antes de repetir."
+                : longo
+                  ? " A operação pode continuar no servidor; repita depois de alguns minutos."
+                  : " O AppServer não respondeu a tempo: costuma ser servidor sobrecarregado, banco " +
+                    "(DBAccess) ou licença fora, ou VPN instável.")
+          )
+        );
+      }, timeoutMs);
     });
-    return Promise.race([this.conn.sendRequest(method, params) as Promise<T>, timeout]).finally(() =>
-      clearTimeout(timer)
-    );
+    const pedido = (this.conn.sendRequest(method, params, cancel.token) as Promise<T>).catch((err: unknown) => {
+      if (err instanceof Error) err.message = portaSemSeparador(err.message);
+      throw err;
+    });
+    return Promise.race([pedido, timeout]).finally(() => {
+      clearTimeout(timer);
+      cancel.dispose();
+    });
   }
 
   // ------------------------------------------------------------------

@@ -16,6 +16,7 @@
  * a compilação (vazia, nula, status desconhecido, fonte sem resultado) não é
  * sucesso.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CompileInfo, CompileResult } from "./advpls.js";
 
@@ -44,7 +45,18 @@ export const RETURN_CODE_HINTS: Record<number, string> = {
     "segundos; se voltar, não insista: num AppServer compartilhado avise o usuário (alguém " +
     "compila ou o RPO está preso; BuildKillUsers=1 e um AppServer por RPO evitam), e num " +
     "AppServer local reiniciá-lo solta o RPO.",
+  40820:
+    "returnCode 40820: a conexão com o servidor caiu e o build não começou; nada foi gravado no " +
+    "RPO. Refaça a conexão com tds_use_server e compile de novo; se voltar, o servidor ou a VPN " +
+    "está instável.",
+  99999:
+    "returnCode 99999: o servidor recusou o build. Causa comum: falta de privilégio de " +
+    "compilação para o usuário no ambiente (\"Insufficient privileges for COMPILE\" no " +
+    "logDoServidor): confira com tds_server_permissions e peça a liberação ao administrador.",
 };
+
+/** Mensagem do servidor quando o build nem começa porque o RPO está ocupado. */
+const BUILD_NAO_INICIADO = /Build not started/i;
 
 export interface CompileVerdict {
   sucesso: boolean;
@@ -81,8 +93,13 @@ function fileKey(p: string): string {
 /**
  * @param enviados Fontes enviados ao servidor. Quando informado, cada um
  *   precisa ter um resultado na resposta.
+ * @param log Mensagens do servidor durante a compilação (logDoServidor).
  */
-export function compileVerdict(result: CompileResult | null | undefined, enviados: string[] = []): CompileVerdict {
+export function compileVerdict(
+  result: CompileResult | null | undefined,
+  enviados: string[] = [],
+  log: string[] = []
+): CompileVerdict {
   const infos = Array.isArray(result?.compileInfos) ? result!.compileInfos : [];
   const status = (i: CompileInfo) => String(i.status ?? "").toUpperCase();
   const erros = infos.filter((i) => ERROR_STATUS.has(status(i)));
@@ -102,7 +119,14 @@ export function compileVerdict(result: CompileResult | null | undefined, enviado
   const buildFalhou = returnCode !== 0;
 
   let falhaDeBuild: string | undefined;
-  if (buildFalhou) {
+  // "Build not started" vem com returnCode próprio e marca todo fonte como
+  // FATAL, mas é o mesmo RPO ocupado do 40910: os FATAL não são erro do fonte.
+  const naoIniciado = buildFalhou && log.some((l) => BUILD_NAO_INICIADO.test(l));
+  if (naoIniciado) {
+    falhaDeBuild =
+      `"Build not started" (returnCode ${returnCode}): ${RETURN_CODE_HINTS[40910].replace(/^returnCode 40910: /, "")} ` +
+      "Os fontes marcados como FATAL nesta resposta são consequência do build não iniciado, não erro do fonte.";
+  } else if (buildFalhou) {
     falhaDeBuild =
       RETURN_CODE_HINTS[returnCode] ??
       `A compilação falhou no servidor (returnCode ${returnCode}). O build foi abortado; ` +
@@ -115,7 +139,7 @@ export function compileVerdict(result: CompileResult | null | undefined, enviado
   }
 
   // Causas conhecidas que o servidor reporta apenas na mensagem do fonte.
-  const causaProvavel = diagnoseKnownCauses(erros);
+  const causaProvavel = naoIniciado ? undefined : diagnoseKnownCauses(erros);
 
   // Resposta sem nenhum resultado por fonte não comprova compilação.
   let inconclusivo: string | undefined;
@@ -168,6 +192,15 @@ function diagnoseKnownCauses(erros: CompileInfo[]): string | undefined {
   if (erros.length === 0) return undefined;
   const texto = erros.map((e) => `${e.message} ${e.detail}`).join(" ").toLowerCase();
 
+  const declaracao = c2003NaDeclaracao(erros);
+  if (declaracao) {
+    return (
+      `C2003 na linha da declaração (${declaracao}): costuma ser um parâmetro ou variável com nome que ` +
+      "um #define do protheus.ch/totvs.ch traduz (ex.: cFilial vira xFilial(Alias())), e o erro aparece " +
+      "na linha da Function. Rode tds_generate_ppo no fonte, veja a linha expandida e renomeie o identificador."
+    );
+  }
+
   if (/authoriz|licen[çc]|compile key|chave de compila|\.aut\b/.test(texto)) {
     return (
       "Possível falta de chave de compilação: fontes com `Function` / `Main Function` " +
@@ -188,4 +221,92 @@ function diagnoseKnownCauses(erros: CompileInfo[]): string | undefined {
     );
   }
   return undefined;
+}
+
+/**
+ * Linha do detalhe do compilador: "FONTE.PRW(12) warning W0008 Too few parameters calling valtype",
+ * ou sem o tipo quando o fonte aborta ("FONTE.PRW(14)   C2003 Syntax Error").
+ */
+const LINHA_DETALHE = /^(.+?)\((\d+)\)\s+(?:(warning|error|fatal)\s+)?([A-Z]\d{4})\s+(.*)$/i;
+/** Declaração de função que o compilador aponta quando o C2003 vem de um #define. */
+const DECLARACAO = /^\s*(?:(?:static|user|main)\s+)?function\s+(\w+)/i;
+
+/**
+ * Função cuja linha de declaração recebeu um C2003, lendo a linha no fonte local.
+ * Sem o arquivo ou com a linha fora dele, não diagnostica.
+ */
+function c2003NaDeclaracao(erros: CompileInfo[]): string | undefined {
+  for (const e of erros) {
+    for (const linha of String(e.detail ?? "").split(/\r?\n/)) {
+      const m = LINHA_DETALHE.exec(linha.trim());
+      if (!m || m[4].toUpperCase() !== "C2003") continue;
+      // C2003 apontado num include: a linha não é do fonte.
+      if (path.basename(m[1]).toLowerCase() !== path.basename(arquivoLocal(e.filePath)).toLowerCase()) continue;
+      let fonte: string[];
+      try {
+        fonte = fs.readFileSync(arquivoLocal(e.filePath), "latin1").split(/\r?\n/);
+      } catch {
+        continue;
+      }
+      const decl = DECLARACAO.exec(fonte[Number(m[2]) - 1] ?? "");
+      if (decl) return `${decl[1]}, linha ${m[2]}`;
+    }
+  }
+  return undefined;
+}
+
+/** Caminho local de um filePath do compilador, que pode vir como URI file://. */
+function arquivoLocal(p: string): string {
+  const s = String(p ?? "");
+  if (!/^file:/i.test(s)) return s;
+  try {
+    return decodeURIComponent(s.replace(/^file:\/*/i, ""));
+  } catch {
+    return s.replace(/^file:\/*/i, "");
+  }
+}
+
+/** Avisos distintos mostrados por fonte; os erros aparecem sempre. */
+export const AVISOS_DISTINTOS_POR_FONTE = 10;
+
+/**
+ * Agrupa as linhas iguais do detalhe do compilador ("W0008 ... — linhas 7, 8, 9").
+ * Erros saem todos; avisos, até `limite` mensagens distintas, e o resto vira uma
+ * contagem. Linha fora do formato do compilador sai como veio.
+ */
+export function resumirDetalhe(detail: string, limite = AVISOS_DISTINTOS_POR_FONTE, fonte?: string): string {
+  const principal = fonte ? path.basename(fonte).toLowerCase() : undefined;
+  const grupos = new Map<string, { erro: boolean; linhas: number[] }>();
+  const outras: string[] = [];
+  for (const bruta of String(detail ?? "").split(/\r?\n/)) {
+    const linha = bruta.trim();
+    if (!linha) continue;
+    const m = LINHA_DETALHE.exec(linha);
+    if (!m) {
+      outras.push(linha);
+      continue;
+    }
+    const tipo = (m[3] ?? "error").toLowerCase();
+    // Mensagem de outro arquivo (include) leva o nome dele: as linhas são de lá.
+    const outro = principal && path.basename(m[1]).toLowerCase() !== principal ? `${m[1]}: ` : "";
+    const chave = `${outro}${tipo} ${m[4]} ${m[5]}`;
+    const g = grupos.get(chave) ?? { erro: tipo !== "warning", linhas: [] };
+    g.linhas.push(Number(m[2]));
+    grupos.set(chave, g);
+  }
+  const fmt = (chave: string, linhas: number[]) => {
+    const lista = linhas.length > 20 ? `${linhas.slice(0, 20).join(", ")}…` : linhas.join(", ");
+    return `${chave} (${linhas.length === 1 ? "linha" : `${linhas.length}x, linhas`} ${lista})`;
+  };
+  const erros = [...grupos].filter(([, g]) => g.erro).map(([k, g]) => fmt(k, g.linhas));
+  const avisos = [...grupos].filter(([, g]) => !g.erro);
+  const mostrados = avisos.slice(0, limite).map(([k, g]) => fmt(k, g.linhas));
+  const resto = avisos.length - mostrados.length;
+  const ocorrenciasResto = avisos.slice(limite).reduce((n, [, g]) => n + g.linhas.length, 0);
+  return [
+    ...outras,
+    ...erros,
+    ...mostrados,
+    ...(resto > 0 ? [`+${resto} avisos distintos (${ocorrenciasResto} ocorrências) não mostrados`] : []),
+  ].join("\n");
 }

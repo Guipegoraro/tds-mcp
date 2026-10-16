@@ -22,14 +22,15 @@ import {
   type CompileOptions,
   type MonitorUser,
 } from "./advpls.js";
-import { compileVerdict, RETURN_CODE_HINTS } from "./verdict.js";
+import { compileVerdict, resumirDetalhe, RETURN_CODE_HINTS } from "./verdict.js";
+import { colisoesDeNome } from "./nomes.js";
 import { resolveDebugAdapterPath } from "./dap.js";
 import { resolveChromiumPath } from "./webapp.js";
 import { resolveWebAgentPath, SCRIPT_PORTA_AGENTE } from "./webagent.js";
 import { lintFiles } from "./linter.js";
 import { gerarPpo } from "./ppo.js";
 import { recusaAcento } from "./acento.js";
-import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
+import { DebugManager, pastaDownloadsPadrao, retornoPorExcecao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
 import {
@@ -45,11 +46,13 @@ import { checkFiles, encodingErrorMessage, type EncodingCheck } from "./encoding
 import { loadConfig, configFilePath, configWarnings } from "./config.js";
 import {
   SessionManager,
+  conexaoPerdida,
   webappUrlFor,
   readServersJson,
   serversJsonPath,
   effectiveIncludes,
   authorizationToken,
+  type ActiveSession,
 } from "./session.js";
 import {
   nowStamp,
@@ -190,6 +193,38 @@ function safe<A extends unknown[]>(fn: (...args: A) => Promise<{ content: { type
   };
 }
 
+/**
+ * Refaz a conexão quando o AppServer derrubou a sessão (autoReconnect, 40820)
+ * e repete o handler uma vez. Com `repetir` false (operação que grava no RPO e
+ * não pode rodar duas vezes às cegas), só reconecta e devolve o erro dizendo
+ * que nada foi repetido.
+ */
+function reconectando<A extends unknown[], R>(repetir: boolean, fn: (...args: A) => Promise<R>) {
+  return async (...args: A): Promise<R> => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!session || !conexaoPerdida(msg)) throw err;
+      try {
+        await session.reconnect();
+      } catch (rec) {
+        throw new Error(
+          `${msg} A conexão com o servidor caiu e a reconexão automática falhou: ` +
+            `${rec instanceof Error ? rec.message : String(rec)}`
+        );
+      }
+      if (!repetir) {
+        throw new Error(
+          `${msg} A conexão com o servidor caiu e foi refeita, mas a operação não foi repetida: ` +
+            "confira o estado (tds_rpo_objects, ou tds_monitor_users para as ações do monitor) antes de chamar de novo."
+        );
+      }
+      return fn(...args);
+    }
+  };
+}
+
 /** Trecho das descrições das tools recusadas durante a depuração. */
 const RECUSA_NA_DEPURACAO =
   " Recusada enquanto há sessão de depuração deste tds-mcp aberta (tds_debug_start) ou tds_run em " +
@@ -235,6 +270,11 @@ function mistoAceitoResumo(checagem: EncodingCheck[]): { arquivo: string; linhas
     .map((c) => ({ arquivo: c.file, linhas: c.linhasUtf8 ?? [] }));
 }
 
+/** SUCCESS sem nada no detalhe: entra só na contagem do tds_compile. */
+function semAviso(i: { status: string; detail: string }): boolean {
+  return String(i.status).toUpperCase() === "SUCCESS" && !String(i.detail ?? "").trim();
+}
+
 /** Monta o request de compilação com sessão/includes/autorização atuais. */
 async function runCompilation(files: string[], options: CompileOptions, aceitarMisto = false) {
   const { client, session } = await ensureClient();
@@ -257,23 +297,56 @@ async function runCompilation(files: string[], options: CompileOptions, aceitarM
 
   // Marca o ponto do log: o advpls reporta falhas de build (ex.: a dica de
   // BuildKillUsers no COMPILEERROR-300) por notificação, não na resposta.
-  const logMark = client.logCount;
+  const compilar = async (sessao: ActiveSession) => {
+    const logMark = client.logCount;
+    const result = await client.compile({
+      connectionToken: sessao.connectionToken,
+      authorizationToken: authorizationToken(cfg),
+      environment: sessao.environment,
+      includeUris: includes.map(toFileUri),
+      fileUris: expanded.map(toFileUri),
+      options,
+      includeUrisRequired: expanded.some(isAdvplSource),
+    });
+    return { result, log: client.logSince(logMark) };
+  };
 
-  const result = await client.compile({
-    connectionToken: active.connectionToken,
-    authorizationToken: authorizationToken(cfg),
-    environment: active.environment,
-    includeUris: includes.map(toFileUri),
-    fileUris: expanded.map(toFileUri),
-    options,
-    includeUrisRequired: expanded.some(isAdvplSource),
-  });
+  // Conexão derrubada pelo AppServer (40820, ou a request recusada com
+  // "autoReconnect"): o build não começou, então compilar de novo numa conexão
+  // refeita não grava nada duas vezes.
+  let atual = active;
+  let primeira: Awaited<ReturnType<typeof compilar>> | undefined;
+  let motivo: string | undefined;
+  try {
+    primeira = await compilar(atual);
+    if (primeira.result?.returnCode === 40820) motivo = "returnCode 40820";
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!conexaoPerdida(msg)) throw err;
+    motivo = msg;
+  }
+  let { result, log: logDaOperacao } = primeira ?? { result: undefined, log: [] as string[] };
+  let reconexao: string | undefined;
+  if (motivo) {
+    try {
+      atual = await session.reconnect();
+      ({ result, log: logDaOperacao } = await compilar(atual));
+      reconexao =
+        `A conexão com o servidor caiu (${motivo}) e foi refeita; a compilação foi repetida uma vez.` +
+        (primeira
+          ? ""
+          : " A primeira tentativa pode ter gravado parte dos fontes: SKIPPED nesta resposta pode ser o que ela gravou.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!primeira) throw new Error(`${motivo} A conexão com o servidor caiu e a reconexão automática falhou: ${msg}`);
+      reconexao = `A conexão com o servidor caiu (${motivo}) e a reconexão automática falhou: ${msg}`;
+    }
+  }
 
   // O veredito considera returnCode (falha de build) E status por fonte.
   // Ver src/verdict.ts — falha de build pode vir com compileInfos vazio.
-  const verdict = compileVerdict(result, expanded.filter(isAdvplSource));
-  const logDaOperacao = client.logSince(logMark);
-  return { active, expanded, result, verdict, logDaOperacao, mistoAceito };
+  const verdict = compileVerdict(result, expanded.filter(isAdvplSource), logDaOperacao);
+  return { active: atual, expanded, result, verdict, logDaOperacao, mistoAceito, reconexao };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +456,11 @@ server.registerTool(
       "RPO). (b) falha de FONTE: itens com status ERROR/FATAL em `resultados`. (c) resposta " +
       "INCONCLUSIVA: vazia, status desconhecido ou fonte sem resultado, explicada em " +
       "`inconclusivo`; não afirme que compilou. Nunca conclua " +
-      "sucesso apenas por não haver erros em `resultados`. Em falha, `logDoServidor` traz as " +
+      "sucesso apenas por não haver erros em `resultados`. `resultados` traz os fontes com algo a " +
+      "dizer, com o detalhe agrupado (mensagem igual uma vez, com as linhas; até 10 avisos " +
+      "distintos por fonte, erros sempre todos); SUCCESS sem detalhe só entra em `compiladosSemAviso`. " +
+      "`avisoColisaoDeNome`: funções do lote que coincidem nos 10 primeiros caracteres (o RPO não " +
+      "as distingue). Em falha, `logDoServidor` traz as " +
       "mensagens do AppServer. ATENÇÃO ao status SKIPPED: o fonte foi ignorado por já estar " +
       "atualizado no RPO — é sucesso, mas NADA foi gravado; confira `ignorados` e o campo " +
       "`aviso` antes de afirmar que compilou. Fontes precisam estar em CP1252: arquivos em " +
@@ -410,7 +487,7 @@ server.registerTool(
     recusarDuranteDepuracao("compilar");
     const options = defaultCompileOptions();
     options.recompile = recompile ?? false;
-    const { active, expanded, verdict, logDaOperacao, mistoAceito } = await runCompilation(
+    const { active, expanded, verdict, logDaOperacao, mistoAceito, reconexao } = await runCompilation(
       arquivos,
       options,
       aceitarMisto ?? false
@@ -418,6 +495,7 @@ server.registerTool(
     const semPrefixo = temporario
       ? expanded.map(nomeNoRpo).filter((n) => !n.startsWith(prefixoWrapper().toUpperCase()))
       : [];
+    const colisoes = colisoesDeNome(expanded);
     // Só o que foi gravado no RPO muda o registro: build revertido não grava nada.
     let avisoRegistro: string | undefined;
     if (verdict.sucesso) {
@@ -452,12 +530,18 @@ server.registerTool(
       erros: verdict.erros.length,
       avisos: verdict.avisos.length,
       ignorados: verdict.ignorados.length,
-      resultados: verdict.infos.map((i) => ({
-        status: i.status,
-        arquivo: i.filePath,
-        mensagem: i.message,
-        detalhe: i.detail,
-      })),
+      ...(reconexao ? { reconexao } : {}),
+      ...(colisoes.length ? { avisoColisaoDeNome: colisoes } : {}),
+      // SUCCESS sem aviso entra só na contagem; os demais vêm com o detalhe agrupado.
+      compiladosSemAviso: verdict.infos.filter(semAviso).length,
+      resultados: verdict.infos
+        .filter((i) => !semAviso(i))
+        .map((i) => ({
+          status: i.status,
+          arquivo: i.filePath,
+          mensagem: i.message,
+          detalhe: resumirDetalhe(i.detail, undefined, i.filePath),
+        })),
       ...(verdict.sucesso ? {} : { logDoServidor: logDaOperacao }),
     };
     return verdict.sucesso ? jsonResult(payload) : jsonFailure(payload);
@@ -504,7 +588,7 @@ server.registerTool(
     if (problemas.length > 0) throw new Error(encodingErrorMessage(problemas));
     const mistoAceito = mistoAceitoResumo(checagem);
 
-    const { diagnosticos, semResposta } = await lintFiles(
+    const { diagnosticos, semResposta, avisoSubida } = await lintFiles(
       advplsPath ?? resolveAdvplsPath(config.advplsPath),
       expanded.map((f) => path.resolve(f)),
       includes
@@ -524,6 +608,9 @@ server.registerTool(
         ? { semResposta, aviso: "O linter não respondeu para estes fontes; a verificação ficou inconclusiva." }
         : {}),
     };
+    const colisoes = colisoesDeNome(expanded);
+    if (colisoes.length) Object.assign(payload, { avisoColisaoDeNome: colisoes });
+    if (avisoSubida) Object.assign(payload, { avisoSubida });
     return sintaxeOk === true ? jsonResult(payload) : jsonFailure(payload);
   })
 );
@@ -583,7 +670,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ filtro, incluirRecursos, limite }) => {
+  safe(reconectando(true, async ({ filtro, incluirRecursos, limite }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const all = await client.inspectorObjects(
@@ -604,7 +691,7 @@ server.registerTool(
         "mtime do arquivo-fonte no momento da compilação; igual ao disco (±2s) = RPO atualizado",
       objetos: filtered.slice(0, max).map((o) => ({ fonte: o.source, dataFonte: o.date })),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -625,7 +712,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ todos }) => {
+  safe(reconectando(true, async ({ todos }) => {
     if (todos) return jsonResult({ registro: TEMPORARIOS_FILE, temporarios: loadTemporarios() });
     const { client, session } = await ensureClient();
     const active = session.required();
@@ -640,7 +727,7 @@ server.registerTool(
       prefixoWrapper: prefixoWrapper(),
       temporarios: registrados.map((t) => ({ ...t, noRpo: noRpo.has(t.fonte) })),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -672,7 +759,7 @@ server.registerTool(
     },
     annotations: { destructiveHint: true },
   },
-  safe(async ({ fontes, foraDoRegistro }) => {
+  safe(reconectando(false, async ({ fontes, foraDoRegistro }) => {
     recusarDuranteDepuracao("remover fontes do RPO");
     const { client, session } = await ensureClient();
     const active = session.required();
@@ -728,7 +815,7 @@ server.registerTool(
       ...(naoRemovidos.length ? { logDoServidor: client.logSince(logMark) } : {}),
     };
     return naoRemovidos.length ? jsonFailure(payload) : jsonResult(payload);
-  })
+  }))
 );
 
 server.registerTool(
@@ -745,7 +832,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ filtro, apenasPublicas, limite }) => {
+  safe(reconectando(true, async ({ filtro, apenasPublicas, limite }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const all = await client.inspectorFunctions(
@@ -767,7 +854,7 @@ server.registerTool(
         linha: f.line,
       })),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -782,7 +869,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ ultimosPatches }) => {
+  safe(reconectando(true, async ({ ultimosPatches }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const info = await client.rpoInfo(active.connectionToken, active.environment);
@@ -802,7 +889,7 @@ server.registerTool(
         totalProgramas: (p.programsApp ?? []).length,
       })),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -851,7 +938,7 @@ server.registerTool(
         .describe("Pasta local dos fontes (para registrar commit git no manifesto)"),
     },
   },
-  safe(async ({ fontes, cliente, ticket, customizacao, tituloTcloud, descricao, pastaFontesLocais }) => {
+  safe(reconectando(true, async ({ fontes, cliente, ticket, customizacao, tituloTcloud, descricao, pastaFontesLocais }) => {
     recusarDuranteDepuracao("gerar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
@@ -974,7 +1061,7 @@ server.registerTool(
       sha256: manifest.sha256,
       fontes: sources,
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -992,7 +1079,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ arquivoPatch }) => {
+  safe(reconectando(true, async ({ arquivoPatch }) => {
     recusarDuranteDepuracao("validar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
@@ -1030,7 +1117,7 @@ server.registerTool(
         dataRPO: v.dateRpo,
       })),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1046,7 +1133,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ arquivoPatch }) => {
+  safe(reconectando(true, async ({ arquivoPatch }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const cfg = readServersJson();
@@ -1059,7 +1146,7 @@ server.registerTool(
       patchUri: toFileUri(arquivoPatch),
     });
     return jsonResult({ arquivo: arquivoPatch, conteudo: result.patchInfos });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1081,7 +1168,7 @@ server.registerTool(
     },
     annotations: { destructiveHint: true },
   },
-  safe(async ({ arquivoPatch, aplicarAntigos }) => {
+  safe(reconectando(false, async ({ arquivoPatch, aplicarAntigos }) => {
     recusarDuranteDepuracao("aplicar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
@@ -1124,7 +1211,7 @@ server.registerTool(
     };
     // Deploy que falhou nunca pode ser lido como sucesso.
     return ok ? jsonResult(payload) : jsonFailure(payload);
-  })
+  }))
 );
 
 server.registerTool(
@@ -1162,14 +1249,14 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ pasta }) => {
+  safe(reconectando(true, async ({ pasta }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const folder = pasta ?? "";
     const pastas = await client.getPatchDir(active.connectionToken, active.environment, folder, true);
     const arquivos = await client.getPatchDir(active.connectionToken, active.environment, folder, false);
     return jsonResult({ servidor: active.def.name, pasta: folder, pastas, arquivos });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1182,7 +1269,7 @@ server.registerTool(
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },
-  safe(async () => {
+  safe(reconectando(true, async () => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const result = await client.serverPermissions(active.connectionToken);
@@ -1194,7 +1281,7 @@ server.registerTool(
       mensagem: result?.message,
       permissoes: ops.map((op, i) => ({ operacao: op, descricao: texts[i] ?? "" })),
     });
-  })
+  }))
 );
 
 // ---------------------------------------------------------------------------
@@ -1275,7 +1362,7 @@ server.registerTool(
     },
     annotations: { readOnlyHint: true },
   },
-  safe(async ({ usuario, ambiente, programa, limite }) => {
+  safe(reconectando(true, async ({ usuario, ambiente, programa, limite }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const users = await client.getUsers(await session.monitorToken());
@@ -1292,7 +1379,7 @@ server.registerTool(
       exibindo: Math.min(filtered.length, max),
       sessoes: filtered.slice(0, max).map(userView),
     });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1308,14 +1395,14 @@ server.registerTool(
     },
     annotations: { destructiveHint: false, openWorldHint: true },
   },
-  safe(async ({ threadId, servidorDaSessao, mensagem }) => {
+  safe(reconectando(false, async ({ threadId, servidorDaSessao, mensagem }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const token = await session.monitorToken();
     const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
     const retorno = await client.sendUserMessage(token, target, mensagem);
     return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1329,14 +1416,14 @@ server.registerTool(
     inputSchema: targetSchema,
     annotations: { destructiveHint: true },
   },
-  safe(async ({ threadId, servidorDaSessao }) => {
+  safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const token = await session.monitorToken();
     const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
     const retorno = await client.killUser(token, target);
     return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  })
+  }))
 );
 
 server.registerTool(
@@ -1351,14 +1438,14 @@ server.registerTool(
     inputSchema: targetSchema,
     annotations: { destructiveHint: true },
   },
-  safe(async ({ threadId, servidorDaSessao }) => {
+  safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
     const { client, session } = await ensureClient();
     const active = session.required();
     const token = await session.monitorToken();
     const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
     const retorno = await client.appKillUser(token, target);
     return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  })
+  }))
 );
 
 // ---------------------------------------------------------------------------
@@ -1744,6 +1831,13 @@ server.registerTool(
       ...breakpointLineWarnings(path.resolve(arquivo), breakpoints.map((b) => b.linha)),
     ];
     const resultado = await s.setBreakpoints(arquivo, breakpoints);
+    if (s.paradaNaoLida) {
+      avisos.push(
+        "O programa parou antes desta troca e a parada ainda não foi lida: mudar os breakpoints não a " +
+          "solta, e no modo navegador a tela fica sem responder. Veja onde com tds_debug_wait e siga com " +
+          "tds_debug_step continuar."
+      );
+    }
     return jsonResult({ arquivo, breakpoints: resultado, ...(avisos.length ? { avisos } : {}) });
   })
 );
@@ -1859,8 +1953,12 @@ server.registerTool(
       "(mensagem, fonte/linha e a tela de detalhes com pilha e variáveis) ou 'tempoEsgotado' " +
       "(ainda rodando ou esperando resposta num diálogo; vêm `tela` e `botoes`). No tempo " +
       "esgotado a execução é encerrada: o navegador fecha e a thread termina (confira com " +
-      "tds_monitor_users se a rotina estava num processamento longo). Não devolve o valor de " +
-      "retorno da função. A função roda SEM empresa aberta (sem xFilial, SX, MV_): rotina que " +
+      "tds_monitor_users se a rotina estava num processamento longo). 'falhaDeAmbiente': a tela " +
+      "mostrou falha do WebAgent ou da conexão do webapp com o AppServer e o programa não ia " +
+      "seguir; vêm `causa` e `tela`, sem esperar o prazo. O valor de retorno da função não volta " +
+      "sozinho: para receber um valor, o wrapper termina com UserException(\"RESULTADO: \" + " +
+      "<valor em texto>) e a resposta vem 'concluido' com o texto em `retorno` (e `retornoEm`, " +
+      "fonte e linha). A função roda SEM empresa aberta (sem xFilial, SX, MV_): rotina que " +
       "precisa de ambiente vai num wrapper com RpcSetEnv, nomeado com o `prefixoWrapper` de " +
       "tds_use_server, ou em tds_debug_start com modulo. Caminho de arquivo passado à função " +
       "vale no AppServer, não na máquina do desenvolvedor. `programa` aceita só o nome da " +
@@ -1917,18 +2015,45 @@ server.registerTool(
         ...(s.webAgentStatus ? { webAgent: s.webAgentStatus } : {}),
       };
       if (fim.estado === "encerrado") {
-        const erroLog = (fim.mensagens ?? []).find((m) => m.nivel === "ERROR");
+        const errosLog = (fim.mensagens ?? []).filter((m) => m.nivel === "ERROR");
+        // O valor do wrapper vem na exceção RESULTADO, mesmo que outro ERROR tenha saído antes.
+        const doRetorno = errosLog.find((m) => retornoPorExcecao(m.mensagem));
+        const erroLog = doRetorno ?? errosLog[0];
+        const erro = erroLog?.mensagem ?? fim.erroDeExecucao?.resumo;
+        const retorno = erro !== undefined ? retornoPorExcecao(erro) : undefined;
+        if (retorno) {
+          return jsonResult({
+            programa,
+            resultado: "concluido",
+            duracaoSeg,
+            retorno: retorno.valor,
+            ...(retorno.onde ? { retornoEm: retorno.onde } : {}),
+            mensagens: (fim.mensagens ?? []).filter((m) => m !== erroLog),
+            ...arquivos,
+          });
+        }
         if (fim.erroDeExecucao || erroLog) {
           return jsonFailure({
             programa,
             resultado: "erro",
             duracaoSeg,
-            erro: erroLog?.mensagem ?? fim.erroDeExecucao?.resumo,
+            erro,
             ...(fim.erroDeExecucao ? { detalhes: fim.erroDeExecucao.detalhes } : {}),
             ...arquivos,
           });
         }
         return jsonResult({ programa, resultado: "concluido", duracaoSeg, mensagens: fim.mensagens, ...arquivos });
+      }
+      if (fim.falhaDeAmbiente) {
+        return jsonFailure({
+          programa,
+          resultado: "falhaDeAmbiente",
+          duracaoSeg,
+          causa: fim.falhaDeAmbiente.causa,
+          tela: fim.falhaDeAmbiente.tela,
+          ...(fim.botoes?.length ? { botoes: fim.botoes } : {}),
+          ...arquivos,
+        });
       }
       const tela = (await s.browser?.screenText()) ?? "";
       const botoes = (await s.browser?.buttons()) ?? [];

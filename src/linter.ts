@@ -17,6 +17,7 @@ import {
   StreamMessageWriter,
 } from "vscode-jsonrpc/node.js";
 import { URI } from "vscode-uri";
+import { advplsBinaryInfo } from "./advpls.js";
 
 export interface LintDiagnostic {
   arquivo: string;
@@ -38,6 +39,21 @@ const COMPILER_WARNINGS: { pattern: RegExp; codigo: string }[] = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Prazo do initialize: o advpls do TDS 2.1.6 espera 30 s antes de responder (tds-vscode#1536). */
+const INITIALIZE_TIMEOUT_MS = 60_000;
+/** Subida acima disso vira aviso no resultado. */
+const SUBIDA_LENTA_MS = 20_000;
+
+/** Versões do binário para a mensagem de erro e o aviso de subida lenta. */
+function descreverAdvpls(advplsPath: string): string {
+  const info = advplsBinaryInfo(advplsPath);
+  const versoes = [
+    info.versaoExtensao ? `extensão tds-vscode ${info.versaoExtensao}` : undefined,
+    info.versaoTdsLs ? `tds-ls ${info.versaoTdsLs}` : undefined,
+  ].filter(Boolean);
+  return `${info.caminho}${versoes.length ? ` (${versoes.join(", ")})` : ""}`;
+}
+
 /** Fontes AdvPL são Windows-1252: € e aspas curvas (0x80-0x9F) não existem em latin1. */
 const CP1252 = new TextDecoder("windows-1252");
 
@@ -46,7 +62,7 @@ export async function lintFiles(
   files: string[],
   includes: string[],
   timeoutPerFileMs = 20000
-): Promise<{ diagnosticos: LintDiagnostic[]; semResposta: string[] }> {
+): Promise<{ diagnosticos: LintDiagnostic[]; semResposta: string[]; avisoSubida?: string }> {
   const proc = spawn(advplsPath, ["language-server", "--notification-level=none"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -87,6 +103,7 @@ export async function lintFiles(
     const folders = [...new Set(files.map((f) => path.dirname(f)))];
     const dyn = { dynamicRegistration: true };
     const kinds = { valueSet: Array.from({ length: 26 }, (_, i) => i + 1) };
+    const inicio = Date.now();
     await withTimeout(
       conn.sendRequest("initialize", {
         processId: process.pid,
@@ -122,9 +139,18 @@ export async function lintFiles(
           window: { workDoneProgress: true, showMessage: { messageActionItem: { additionalPropertiesSupport: true } } },
         },
       }),
-      30000,
-      "O language server não respondeu ao initialize."
+      INITIALIZE_TIMEOUT_MS,
+      `O language server não respondeu ao initialize em ${INITIALIZE_TIMEOUT_MS / 1000} s. advpls em uso: ` +
+        `${descreverAdvpls(advplsPath)}. O advpls do TDS 2.1.6 já gasta 30 s só na subida ` +
+        "(tds-vscode#1536); aponte o advplsPath do ~/.tds-mcp/config.json para o de outra versão (ver README)."
     );
+    const subidaMs = Date.now() - inicio;
+    const avisoSubida =
+      subidaMs > SUBIDA_LENTA_MS
+        ? `O language server levou ${Math.round(subidaMs / 1000)} s para subir (advpls: ${descreverAdvpls(advplsPath)}). ` +
+          "O advpls do TDS 2.1.6 espera 30 s em toda subida (tds-vscode#1536); com o advplsPath do " +
+          "~/.tds-mcp/config.json apontando para o de outra versão, a verificação fica rápida (ver README)."
+        : undefined;
     await notify("initialized", {});
 
     const diagnosticos: LintDiagnostic[] = [];
@@ -163,7 +189,7 @@ export async function lintFiles(
         });
       }
     }
-    return { diagnosticos, semResposta };
+    return { diagnosticos, semResposta, ...(avisoSubida ? { avisoSubida } : {}) };
   } finally {
     try {
       conn.dispose();

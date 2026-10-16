@@ -166,15 +166,21 @@ Return
 ```
 
 Rotina que só precisa de parâmetro com tipo (numérico, lógico, data) e não usa
-empresa dispensa o `RpcSetEnv`. Para ver o valor de retorno, guarde-o numa variável e
-rode no modo headless com `rastro: ["xRet"]` na linha do `Return`: o valor vem em
-`mensagens` (nível RASTRO).
+empresa dispensa o `RpcSetEnv`. Para ver o valor de retorno com `tds_run`, termine o
+wrapper com `UserException("RESULTADO: " + <valor em texto>)`: a resposta vem
+`concluido`, com o texto em `retorno` e o fonte e a linha em `retornoEm`. Valor que não é
+caractere vai convertido (`cValToChar`; `JsonObject` com `ToJson()`). Vários
+valores cabem num texto só (`"soma=3 | total=20"`).
 
 ```advpl
 User Function zTK3FCal()
     Local xRet := U_zCalc(5, .T.)
+    UserException("RESULTADO: " + cValToChar(xRet))
 Return xRet
 ```
+
+No modo headless, o mesmo valor também sai com `rastro: ["xRet"]` na linha do `Return`
+(vem em `mensagens`, nível RASTRO).
 
 Escreva o wrapper só com ASCII (sem acento, nem em comentário): assim ele é válido em
 CP1252, que é o que `tds_compile` exige, mesmo gravado por uma ferramenta que salva em

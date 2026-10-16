@@ -13,8 +13,10 @@ módulo, headless, REST/jobs, temporários e problemas comuns:
 
 Dois vocabulários de resultado:
 
-- `tds_run` devolve `resultado`: **concluido**, **erro** (mensagem, fonte/linha, pilha) ou
-  **tempoEsgotado** (vêm `tela` e `botoes`; a execução é encerrada).
+- `tds_run` devolve `resultado`: **concluido** (com `retorno` quando o wrapper devolve um
+  valor, passo 2), **erro** (mensagem, fonte/linha, pilha), **falhaDeAmbiente** (a tela
+  mostrou falha do WebAgent ou da conexão do webapp; vêm `causa` e `tela`, e o programa não
+  rodou até o fim) ou **tempoEsgotado** (vêm `tela` e `botoes`; a execução é encerrada).
 - `tds_debug_start`/`wait`/`step` devolvem `estado`: **parado** (local, pilha,
   variáveis), **executando** (não parou no prazo; headless traz `tela` e `botoes`,
   navegador traz `conectado`) ou **encerrado** (programa terminou; erro em
@@ -38,9 +40,10 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
 2. **Caminho.** Escolha pelo que a rotina precisa:
    - Saber se roda ou qual erro dá, sem tela, sem empresa e em até ~100 s: `tds_run`
      com `timeoutSeg` adequado (padrão 60; no tempo esgotado a execução é interrompida no
-     meio). A função roda sem empresa aberta (sem `xFilial`, SX, `MV_`). O `tds_run` não
-     devolve o valor de retorno: para ver o que a função devolve, use o wrapper com
-     `rastro` no `Return` (REFERENCE.md, "Wrapper de teste").
+     meio). A função roda sem empresa aberta (sem `xFilial`, SX, `MV_`). Para ver o que a
+     função devolve, o wrapper termina com `UserException("RESULTADO: " + <valor em
+     texto>)`: a resposta vem **concluido** com o texto em `retorno` (REFERENCE.md,
+     "Wrapper de teste").
    - Rotina sem tela, ou processamento que pode passar de 100 s: `tds_debug_start` modo
      `headless`, repetindo `tds_debug_wait` (também sem empresa aberta).
    - Rotina que usa o ambiente do usuário (empresa e filial, `Pergunte`, `MV_`) ou tem
@@ -125,7 +128,9 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
    observados na execução.
 
 7. **Navegação.** `tds_debug_step` para avançar; para interromper um programa rodando ou
-   rodar até uma linha, inclua o breakpoint com `tds_debug_breakpoints`.
+   rodar até uma linha, inclua o breakpoint com `tds_debug_breakpoints`. Trocar ou remover
+   breakpoints não solta uma parada: com o aviso de programa já parado no retorno, veja onde
+   com `tds_debug_wait` e siga com `continuar`.
 
 8. **Encerramento.** `tds_debug_stop` ao terminar, inclusive quando a sessão falhou. No
    modo navegador, siga o `fecharAba` do retorno: `list_pages` e `close_page` da aba do

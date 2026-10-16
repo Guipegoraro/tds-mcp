@@ -6,6 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as net from "node:net";
 import { AdvplsClient, CONN_TYPE } from "./advpls.js";
 import type { TdsMcpConfig, ServerCredentials } from "./config.js";
 
@@ -147,10 +148,60 @@ export function savedTokenFor(cfg: ServersJson, def: TdsServerDef, environment: 
   return undefined;
 }
 
+/** Mensagem do advpls quando a conexão com o AppServer caiu e o autoReconnect dele não a refez. */
+export function conexaoPerdida(message: string): boolean {
+  return /autoReconnect|\b40820\b/i.test(message);
+}
+
+/** Endereço sem esquema (o servers.json aceita "http://host"). */
+function hostDe(address: string): string {
+  return address.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+}
+
+/** Abre uma conexão TCP na porta só para saber se ela aceita conexão. */
+export function portaAceita(host: string, port: number, timeoutMs = 5000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port });
+    const fim = (ok: boolean) => {
+      sock.destroy();
+      resolve(ok);
+    };
+    sock.setTimeout(timeoutMs, () => fim(false));
+    sock.once("connect", () => fim(true));
+    sock.once("error", () => fim(false));
+  });
+}
+
+/**
+ * Complementa a falha de validação ou de conexão com o que a porta diz: porta
+ * fechada aponta para rede (servidor, VPN, porta); porta aberta, para o
+ * AppServer (banco, licença, sobrecarga, build incompatível).
+ */
+async function explicarFalhaDeConexao(def: TdsServerDef, message: string): Promise<string> {
+  const destino = `${def.address}:${def.port}`;
+  const aberta = await portaAceita(hostDe(def.address), def.port);
+  return aberta
+    ? `${message} A porta ${destino} aceita conexão, mas o AppServer não completou a conexão: costuma ser ` +
+        "AppServer sobrecarregado ou travado, banco (DBAccess) ou licença fora, ou o tds-ls antigo para a " +
+        "build do servidor (veja tds_server_log)."
+    : `${message} A porta ${destino} não aceita conexão: o servidor está fora do ar, a VPN está ` +
+        "desconectada ou a porta no servers.json está errada.";
+}
+
+interface PedidoDeConexao {
+  nameOrId: string;
+  environment?: string;
+  explicit?: ServerCredentials;
+}
+
 export class SessionManager {
   private client: AdvplsClient;
   private config: TdsMcpConfig;
   current?: ActiveSession;
+  /** O último tds_use_server que deu certo, para refazer a conexão quando ela cai. */
+  private ultimoPedido?: PedidoDeConexao;
+  /** Reconexão em andamento, compartilhada pelas tools que perderam a conexão ao mesmo tempo. */
+  private reconectando?: Promise<ActiveSession>;
 
   constructor(client: AdvplsClient, config: TdsMcpConfig) {
     this.client = client;
@@ -158,14 +209,90 @@ export class SessionManager {
   }
 
   /**
-   * Conecta e autentica em um servidor/ambiente.
-   * Ordem de autenticação: credenciais informadas na chamada (só para esta
-   * sessão; não são gravadas) -> token salvo do TDS -> credenciais do config.
+   * Conecta e autentica em um servidor/ambiente. A sessão anterior só é
+   * encerrada depois que a nova conecta: se a nova falha, a anterior continua
+   * ativa.
    */
   async useServer(
     nameOrId: string,
     environment?: string,
     explicit?: ServerCredentials
+  ): Promise<ActiveSession> {
+    const previous = this.current;
+    const nova = await this.open(nameOrId, environment, explicit);
+    this.current = nova;
+    this.ultimoPedido = { nameOrId: nova.def.id, environment: nova.environment, explicit };
+    // O advpls guarda uma conexão por nome de servidor e desconecta pelo nome:
+    // na mesma configuração, a nova já tomou o lugar da anterior, e desconectar
+    // a anterior derrubaria a nova. Sai só a conexão de monitor dela.
+    if (previous) await this.close(previous, previous.def.name === nova.def.name);
+    return nova;
+  }
+
+  /**
+   * Refaz a conexão do último tds_use_server, para quando o AppServer derrubou
+   * a sessão (autoReconnect, 40820).
+   */
+  async reconnect(): Promise<ActiveSession> {
+    if (!this.ultimoPedido) return this.required();
+    // Tools em paralelo que perdem a conexão juntas esperam a mesma reconexão:
+    // duas no mesmo nome deixariam ativa a que o advpls já substituiu.
+    if (!this.reconectando) {
+      const { nameOrId, environment, explicit } = this.ultimoPedido;
+      this.reconectando = this.useServer(nameOrId, environment, explicit).finally(() => {
+        this.reconectando = undefined;
+      });
+    }
+    return this.reconectando;
+  }
+
+  /** Desconecta a sessão e a conexão de monitor dela (melhor esforço: a conexão pode já ter caído). */
+  private async close(s: ActiveSession, soMonitor = false): Promise<void> {
+    const tokens: [string, string][] = soMonitor ? [] : [[s.def.name, s.connectionToken]];
+    if (s.monitorToken) tokens.push([`${s.def.name}_monitor`, s.monitorToken]);
+    for (const [name, token] of tokens) {
+      try {
+        await this.client.disconnect(name, token);
+      } catch {
+        /* melhor esforço */
+      }
+    }
+  }
+
+  /**
+   * Abre a conexão e autentica, sem mexer na sessão ativa.
+   * Ordem de autenticação: credenciais informadas na chamada (só para esta
+   * sessão; não são gravadas) -> token salvo do TDS -> credenciais do config.
+   */
+  private async open(
+    nameOrId: string,
+    environment?: string,
+    explicit?: ServerCredentials
+  ): Promise<ActiveSession> {
+    const abertas: [string, string][] = [];
+    try {
+      return await this.openInner(nameOrId, environment, explicit, abertas);
+    } catch (err) {
+      // Conexão aberta antes da falha (autenticação recusada) não fica pendurada no
+      // advpls. No nome da sessão ativa ela já ocupou o lugar da ativa, e
+      // desconectar pelo nome derrubaria a ativa.
+      for (const [name, token] of abertas) {
+        if (name === this.current?.def.name) continue;
+        try {
+          await this.client.disconnect(name, token);
+        } catch {
+          /* melhor esforço: o erro que vale é o da conexão */
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async openInner(
+    nameOrId: string,
+    environment: string | undefined,
+    explicit: ServerCredentials | undefined,
+    abertas: [string, string][]
   ): Promise<ActiveSession> {
     const cfg = readServersJson();
     const def = findServer(cfg, nameOrId);
@@ -182,21 +309,6 @@ export class SessionManager {
       );
     }
 
-    // Encerra sessão anterior (e a conexão de monitor dela), se houver
-    if (this.current) {
-      const previous = this.current;
-      const tokens: [string, string][] = [[previous.def.name, previous.connectionToken]];
-      if (previous.monitorToken) tokens.push([`${previous.def.name}_monitor`, previous.monitorToken]);
-      for (const [name, token] of tokens) {
-        try {
-          await this.client.disconnect(name, token);
-        } catch {
-          /* melhor esforço */
-        }
-      }
-      this.current = undefined;
-    }
-
     // Detecta build/secure atuais (também valida que o servidor está no ar)
     let build = def.buildVersion ?? "";
     let secure = def.secure;
@@ -206,27 +318,34 @@ export class SessionManager {
       secure = !!v.secure;
     } catch {
       if (!build || build === "TIMEOUT") {
-        throw new Error(`Servidor "${def.name}" (${def.address}:${def.port}) não respondeu à validação.`);
+        throw new Error(
+          await explicarFalhaDeConexao(def, `Servidor "${def.name}" (${def.address}:${def.port}) não respondeu à validação.`)
+        );
       }
     }
 
-    const conn = await this.client.connect({
-      serverName: def.name,
-      identification: def.id,
-      server: def.address,
-      port: def.port,
-      build,
-      secure,
-      environment: env,
-      serverType: serverTypeCode(def.type),
-    });
+    const conn = await this.client
+      .connect({
+        serverName: def.name,
+        identification: def.id,
+        server: def.address,
+        port: def.port,
+        build,
+        secure,
+        environment: env,
+        serverType: serverTypeCode(def.type),
+      })
+      .catch(async (err: unknown) => {
+        throw new Error(await explicarFalhaDeConexao(def, err instanceof Error ? err.message : String(err)));
+      });
 
     if (!conn.connectionToken) {
-      throw new Error(`Falha ao conectar em "${def.name}" (${def.address}:${def.port}).`);
+      throw new Error(await explicarFalhaDeConexao(def, `Falha ao conectar em "${def.name}" (${def.address}:${def.port}).`));
     }
+    abertas.push([def.name, conn.connectionToken]);
 
     if (!conn.needAuthentication) {
-      this.current = {
+      return {
         def,
         environment: env,
         connectionToken: conn.connectionToken,
@@ -234,7 +353,6 @@ export class SessionManager {
         authMethod: "none",
         secure,
       };
-      return this.current;
     }
 
     // 1) Token de reconexão salvo pelo TDS (zero-config quando o VS Code já conectou antes)
@@ -242,8 +360,9 @@ export class SessionManager {
     if (saved) {
       try {
         const rec = await this.client.reconnect(def.name, saved);
+        if (rec.connectionToken) abertas.push([def.name, rec.connectionToken]);
         if (rec.connectionToken && (!rec.environment || rec.environment.toLowerCase() === env.toLowerCase())) {
-          this.current = {
+          return {
             def,
             environment: env,
             connectionToken: rec.connectionToken,
@@ -251,7 +370,6 @@ export class SessionManager {
             authMethod: "saved-token",
             secure,
           };
-          return this.current;
         }
       } catch {
         /* token expirado/ambiente diferente: cai para credenciais */
@@ -275,7 +393,10 @@ export class SessionManager {
           environment: env,
           serverType: serverTypeCode(def.type),
         });
-        if (fresh.connectionToken) authConnToken = fresh.connectionToken;
+        if (fresh.connectionToken) {
+          authConnToken = fresh.connectionToken;
+          abertas.push([def.name, fresh.connectionToken]);
+        }
       }
       const auth = await this.client
         .authenticate({
@@ -302,7 +423,7 @@ export class SessionManager {
           throw err;
         });
       if (auth.connectionToken) {
-        this.current = {
+        return {
           def,
           environment: env,
           connectionToken: auth.connectionToken,
@@ -310,7 +431,6 @@ export class SessionManager {
           authMethod: "credentials",
           secure,
         };
-        return this.current;
       }
       throw new Error(`Autenticação recusada em "${def.name}" para o usuário "${creds.user}".`);
     }

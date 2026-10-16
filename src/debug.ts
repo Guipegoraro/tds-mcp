@@ -112,8 +112,60 @@ interface Snapshot {
   webAgent?: { ativo: boolean; conectado?: boolean; motivo?: string };
   tela?: string;
   botoes?: string[];
+  /** Situação que o agente precisa saber sobre a parada (ex.: breakpoint já removido). */
+  aviso?: string;
+  /** Tela de falha do ambiente (WebAgent, conexão do webapp): o programa não vai seguir. */
+  falhaDeAmbiente?: { causa: string; tela: string };
   fecharAba?: string;
   arquivosBaixados?: ArquivoBaixado[];
+}
+
+/**
+ * Telas do webapp em que o programa não vai seguir, com a causa para o agente.
+ * O webapp conecta no WebAgent antes do AppServer: com o agente fora, a página
+ * para nessa tela e o programa nem começa.
+ */
+export const FALHAS_DE_AMBIENTE: { padrao: RegExp; causa: string }[] = [
+  {
+    padrao: /Acesso n[aã]o autorizado ao WebAgent/i,
+    causa:
+      "O webapp recusou a versão do WebAgent e o programa não começou: rode sem webAgent ou configure " +
+      "webAgentPath com a versão compatível com o webapp do servidor.",
+  },
+  {
+    padrao: /Falha ao conectar com o WebAgent/i,
+    causa:
+      "O webapp não conseguiu falar com o WebAgent e o programa não começou: rode sem webAgent, ou confira " +
+      "se o WebAgent desta máquina sobe (webAgentPath).",
+  },
+  {
+    padrao: /ERR0032|Conex[aã]o entre TOTVS Webapp e Application Server interrompida/i,
+    causa:
+      "A conexão do webapp com o AppServer caiu (AppServer reiniciado, thread derrubada pelo monitor ou " +
+      "rede instável): confira o servidor com tds_monitor_users e rode de novo.",
+  },
+];
+
+/** Falha de ambiente reconhecida no texto da tela, se houver. */
+export function falhaDeAmbienteNaTela(tela: string): { causa: string; tela: string } | undefined {
+  const f = FALHAS_DE_AMBIENTE.find((x) => x.padrao.test(tela));
+  return f ? { causa: f.causa, tela: tela.length > 1000 ? tela.slice(0, 1000) + "…" : tela } : undefined;
+}
+
+/** Prefixo da UserException com que o wrapper devolve um valor ao tds_run. */
+export const PREFIXO_RETORNO = "RESULTADO:";
+
+/**
+ * Valor devolvido por UserException("RESULTADO: <valor>"). O erro chega como
+ * "RESULTADO: <valor>\nU_X - X.PRW(15)": a última linha é o local da exceção.
+ */
+export function retornoPorExcecao(erro: string): { valor: string; onde?: string } | undefined {
+  if (!erro.startsWith(PREFIXO_RETORNO)) return undefined;
+  const linhas = erro.slice(PREFIXO_RETORNO.length).replace(/^ /, "").split("\n");
+  const ultima = linhas.length > 1 ? linhas[linhas.length - 1].trim() : "";
+  const onde = /^\S+ - \S+\(\d+\)$/.test(ultima) ? ultima : undefined;
+  if (onde) linhas.pop();
+  return { valor: linhas.join("\n").replace(/\r$/, ""), ...(onde ? { onde } : {}) };
 }
 
 /** Valor de variável no formato curto "<tipo> <valor>", com "(+)" quando expansível. */
@@ -141,6 +193,10 @@ export class DebugSession {
   browser?: HeadlessWebapp;
   watches: string[] = [];
   breakpoints = new Map<string, BreakpointSpec[]>();
+  /** Linhas em que o adaptador confirmou cada breakpoint (pode ser outra que a pedida). */
+  private linhasConfirmadas = new Map<string, Set<number>>();
+  /** Linhas pedidas ou confirmadas que uma troca de breakpoints tirou, por fonte. */
+  private linhasRemovidas = new Map<string, Set<number>>();
   lastActivity = Date.now();
   private threadId?: number;
   private logIndex = 0;
@@ -199,6 +255,15 @@ export class DebugSession {
     return this.conectado;
   }
 
+  /**
+   * Parada que ainda não foi lida pelo tds_debug_wait: trocar os breakpoints
+   * não solta a thread, e no modo navegador a tela fica sem responder até
+   * alguém continuar.
+   */
+  get paradaNaoLida(): boolean {
+    return this.dap.events.some((e) => !e.consumed && e.event === "stopped");
+  }
+
   async setBreakpoints(file: string, specs: BreakpointSpec[]) {
     const abs = path.resolve(file);
     const r = await this.dap.request("setBreakpoints", {
@@ -210,8 +275,14 @@ export class DebugSession {
         ...(b.contagem ? { hitCondition: b.contagem } : {}),
       })),
     });
+    const confirmadas = new Set<number>((r.body?.breakpoints ?? []).map((b: any) => Number(b.line)));
+    const novas = new Set([...specs.map((b) => b.linha), ...confirmadas]);
+    const antes = [...(this.breakpoints.get(abs) ?? []).map((b) => b.linha), ...(this.linhasConfirmadas.get(abs) ?? [])];
+    const removidas = new Set([...(this.linhasRemovidas.get(abs) ?? []), ...antes].filter((l) => !novas.has(l)));
+    this.linhasRemovidas.set(abs, removidas);
     if (specs.length) this.breakpoints.set(abs, specs);
     else this.breakpoints.delete(abs);
+    this.linhasConfirmadas.set(abs, confirmadas);
     return (r.body?.breakpoints ?? []).map((b: any) => ({
       linha: b.line,
       verificado: !!b.verified,
@@ -246,6 +317,15 @@ export class DebugSession {
           this.errorCapture = captured;
           const end = await this.dap.waitFor(["stopped", "terminated"], 15000);
           if (end) return this.handleEvent(end);
+        }
+      }
+      // Tela de falha do ambiente: o programa não vai parar nem terminar, e
+      // esperar o prazo inteiro só atrasa o diagnóstico.
+      if (this.browser && !this.errorCapture) {
+        const tela = ((await this.browser.screenText().catch(() => undefined)) ?? "").trim();
+        const falha = falhaDeAmbienteNaTela(tela);
+        if (falha) {
+          return { estado: "executando", mensagens: this.takeLogs(), falhaDeAmbiente: falha, ...(await this.telaHeadless()) };
         }
       }
     }
@@ -378,7 +458,38 @@ export class DebugSession {
       };
     }
     this.threadId = ev.body?.threadId ?? 1;
-    return this.snapshot(ev.body?.description || ev.body?.reason);
+    const snap = await this.snapshot(ev.body?.description || ev.body?.reason);
+    const removido = ev.body?.reason === "breakpoint" ? await this.breakpointRemovido() : undefined;
+    return removido ? { ...snap, aviso: removido } : snap;
+  }
+
+  /**
+   * Parada de breakpoint numa linha cujo breakpoint foi removido: a remoção
+   * pode ter chegado ao adaptador depois da parada. Reenvia os breakpoints do fonte,
+   * para as próximas passagens valerem, e devolve o aviso.
+   */
+  private async breakpointRemovido(): Promise<string | undefined> {
+    const top = (await this.frames().catch(() => []))[0];
+    if (!top?.source) return undefined;
+    // O fonte pelo caminho; pelo nome só quando um único fonte com breakpoint removido tem esse nome.
+    const alvo = path.resolve(top.source).toLowerCase();
+    const nome = path.basename(top.source).toLowerCase();
+    const candidatos = [...this.linhasRemovidas.keys()];
+    const arquivo =
+      candidatos.find((f) => f.toLowerCase() === alvo) ??
+      (() => {
+        const mesmos = candidatos.filter((f) => path.basename(f).toLowerCase() === nome);
+        return mesmos.length === 1 ? mesmos[0] : undefined;
+      })();
+    if (!arquivo || !this.linhasRemovidas.get(arquivo)?.has(top.line)) return undefined;
+    if (this.breakpoints.get(arquivo)?.some((b) => b.linha === top.line)) return undefined;
+    if (this.linhasConfirmadas.get(arquivo)?.has(top.line)) return undefined;
+    await this.setBreakpoints(arquivo, this.breakpoints.get(arquivo) ?? []).catch(() => undefined);
+    return (
+      `Parou em ${path.basename(arquivo)}:${top.line}, onde havia um breakpoint que foi removido: a remoção ` +
+      "pode ter chegado ao depurador depois da parada. Os breakpoints do fonte foram reenviados; siga com " +
+      "tds_debug_step continuar."
+    );
   }
 
   /**

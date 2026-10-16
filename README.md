@@ -78,9 +78,9 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | Tool | Descrição | Efeito |
 |---|---|---|
 | `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
-| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada. Devolve `prefixoWrapper` (início do nome de wrapper de teste, único por pessoa e máquina) e `maquinaLocal` (o computador das suas execuções no monitor) | sessão |
-| `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `temporario` registra o fonte para remoção posterior | **grava no RPO** |
-| `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha); não usa o AppServer | nenhum |
+| `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada. A sessão anterior só é encerrada depois que a nova conecta; na falha, o erro diz se a porta aceita conexão (rede/VPN fora ou AppServer sem responder). Devolve `prefixoWrapper` (início do nome de wrapper de teste, único por pessoa e máquina) e `maquinaLocal` (o computador das suas execuções no monitor) | sessão |
+| `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `resultados` traz os fontes com erro, aviso ou detalhe, agrupado (SUCCESS sem detalhe só na contagem); `avisoColisaoDeNome` aponta funções que coincidem nos 10 primeiros caracteres; `temporario` registra o fonte para remoção posterior | **grava no RPO** |
+| `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha) e a colisão de nomes nos 10 primeiros caracteres; não usa o AppServer | nenhum |
 | `tds_generate_ppo` | Fonte pré-processado (debug de `#define`/`#include`/`#xtranslate`) pelo advpls appre local, sem AppServer | nenhum |
 | `tds_rpo_objects` | Lista objetos do RPO (filtro + datas) | read-only |
 | `tds_rpo_temporarios` | Lista os fontes compilados com `temporario` e se ainda estão no RPO | read-only |
@@ -98,10 +98,10 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_monitor_send_message` | Envia mensagem ao usuário de uma sessão | **afeta usuário** |
 | `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre | **destrutivo** |
 | `tds_monitor_kill_user` | Derruba a sessão imediatamente | **destrutivo** |
-| `tds_run` | Executa uma função num SmartClient HTML invisível: concluído, erro (fonte/linha + pilha com variáveis) ou tempo esgotado (texto da tela); arquivos enviados ao navegador (PDF, CpyS2TW) em `arquivosBaixados` | **executa código** |
+| `tds_run` | Executa uma função num SmartClient HTML invisível: concluído (com `retorno` quando o wrapper termina em `UserException("RESULTADO: ...")`), erro (fonte/linha + pilha com variáveis), falha de ambiente (tela do WebAgent ou da conexão do webapp, sem esperar o prazo) ou tempo esgotado (texto da tela); arquivos enviados ao navegador (PDF, CpyS2TW) em `arquivosBaixados` | **executa código** |
 | `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST); `modulo` roda a rotina dentro do módulo pelo SIGABPM; `detalheTexto` mostra os bytes das strings na sessão | **executa código** |
 | `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
-| `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro | depuração |
+| `tds_debug_breakpoints` | Troca os breakpoints de um fonte (também com o programa rodando); condição, contagem, logpoint e rastro; avisa quando o programa já está parado | depuração |
 | `tds_debug_variables` | Variáveis por escopo (Local, Private, Public, Static, Table) e frame; expande array/JSON/tabela; bytes de string em sessão aberta com `detalheTexto` | read-only |
 | `tds_debug_evaluate` | Avalia expressão no ponto de parada; `x := v` altera o programa; bytes de string em sessão aberta com `detalheTexto` | **executa código** |
 | `tds_debug_watch` / `tds_debug_stop` | Expressões observadas a cada parada / encerra a sessão (a thread parada num breakpoint é encerrada ali) e o WebAgent dela; no modo navegador devolve `fecharAba` | depuração |
@@ -233,7 +233,7 @@ parecer sucesso:
 
 | Nível | Onde aparece | Exemplo |
 |---|---|---|
-| **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40910` (RPO em uso, o build não começa), `40840` (token expirado) |
+| **Build** | `returnCode != 0` + `falhaDeBuild` | `COMPILEERROR-300` (sem acesso exclusivo ao RPO), `40910` ou "Build not started" (RPO em uso, o build não começa), `40820` (conexão caiu), `99999` (sem privilégio de compilação), `40840` (token expirado) |
 | **Fonte** | `resultados[].status` = `ERROR`/`FATAL` | erro de sintaxe (`returnCode -1`) |
 
 Uma falha de **build** acontece antes/fora da compilação individual: `resultados` pode vir
@@ -245,6 +245,17 @@ Uma falha de **build** acontece antes/fora da compilação individual: `resultad
 Quando falha, a resposta também vem marcada como erro no protocolo MCP (`isError`) e inclui
 `logDoServidor` com as mensagens do AppServer — é lá que aparece, por exemplo, a dica
 `BuildKillUsers = 1` do `COMPILEERROR-300`.
+
+**Resposta enxuta:** `resultados` lista os fontes com erro, aviso ou algum detalhe; `SUCCESS` sem
+detalhe entra só em `compiladosSemAviso`. No `detalhe`, mensagens iguais saem uma vez com a contagem e as linhas
+(`warning W0008 Too few parameters calling valtype (37x, linhas 12, 40, ...)`). Erros saem todos;
+avisos, até 10 mensagens distintas por fonte, e o resto vira uma contagem.
+
+**Conexão que cai:** com `returnCode 40820`, ou com a request recusada por "autoReconnect", o tds-mcp refaz a conexão do último
+`tds_use_server` e compila de novo uma vez (no 40820 o build não tinha começado; na request recusada, `reconexao` avisa que SKIPPED pode ser o que a primeira tentativa gravou). As consultas (`tds_rpo_*`,
+`tds_patch_generate`/`validate`/`info`, `tds_server_*`, `tds_monitor_users`) também reconectam e
+repetem; o que grava ou afeta usuário (`tds_patch_apply`, `tds_rpo_delete`, envio de mensagem e
+derrubada pelo monitor) só reconecta e devolve o erro, sem repetir.
 
 **Sucesso sem gravação:** fontes já atualizados no RPO voltam com status `SKIPPED` (quando
 `recompile=false`). Isso conta como sucesso, mas **nada foi escrito** — se todos forem
@@ -335,8 +346,9 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 - `advplsPath` — só se o advpls não estiver na extensão instalada (sem ele, usa a extensão
   tds-vscode de maior versão; `tds_server_log` mostra qual binário está em uso). Também aceita a variável
   de ambiente `TDS_MCP_ADVPLS`. O advpls da extensão 2.1.6 (tds-ls 2.2.7) espera 30 s a cada subida
-  ([issue #1536](https://github.com/totvs/tds-vscode/issues/1536)), e o `tds_syntax_check` estoura o
-  prazo: aponte para o advpls de outra versão (o pacote `.vsix` da release, extraído numa pasta própria).
+  ([issue #1536](https://github.com/totvs/tds-vscode/issues/1536)), e cada `tds_syntax_check` leva
+  esses 30 s a mais (o resultado traz `avisoSubida`): aponte para o advpls de outra versão (o pacote
+  `.vsix` da release, extraído numa pasta própria).
 - `credentials` — **senhas em texto plano**. Prefira deixar vazio e usar o token do TDS.
   O arquivo fica fora do repositório; nunca o versione.
 - `webappUrls` — URL do webapp por servidor, quando não for `http(s)://<endereço>:<porta>/webapp/`
@@ -410,9 +422,12 @@ da mesma ação para operar grade no modo navegador. Compile como temporário e 
   (`@totvs/tds-ls`), então o suporte é uma mudança pequena em `resolveAdvplsPath()` —
   PRs bem-vindos.
 - **Prazos do advpls**: compilação e patch (gerar, aplicar, validar, ler) têm 30 min para
-  responder; os demais pedidos, 5 min. O prazo não cancela nada no servidor: depois de um
-  timeout de compilação o build pode continuar e gravar no RPO, então confira com
-  `tds_rpo_objects` antes de repetir.
+  responder; remoção de fonte do RPO, 5 min; conexão, autenticação e consultas, 90 s cada
+  (abaixo dos 120 s em que o Claude Code passa a chamada para segundo plano). No prazo vencido
+  o advpls é avisado do cancelamento, mas o AppServer pode continuar: depois de um timeout de
+  compilação o build pode terminar e gravar no RPO, então confira com `tds_rpo_objects` antes
+  de repetir. A verificação de sintaxe espera
+  até 60 s a subida do advpls e avisa (`avisoSubida`) quando ela passa de 20 s.
 - **O protocolo `$totvsserver/*` não é um contrato público da TOTVS.** Ao atualizar a
   extensão TDS, o binário muda junto; se algo quebrar, `tds_server_log` ajuda a
   diagnosticar. A especificação viva é
