@@ -243,6 +243,16 @@ try {
       /ztstdbgd \(2\)\.txt$/i.test(a2?.arquivo ?? "") && fs.existsSync(a1?.arquivo ?? ""),
       short(a2)
     );
+    // PDF do FWMSPrinter (SetViewPDF + Print): o webapp manda o arquivo ao navegador.
+    const pdf = await call("tds_run", { programa: "u_zTstDbgP", pastaDownloads: pastaDl, timeoutSeg: 90 });
+    const ap = pdf.data?.arquivosBaixados?.find((a) => /\.pdf$/i.test(a.arquivo ?? ""));
+    check(
+      "tds_run: PDF do FWMSPrinter vem em arquivosBaixados e é PDF",
+      pdf.data?.resultado === "concluido" &&
+        ap?.estado === "concluido" &&
+        fs.readFileSync(ap.arquivo).subarray(0, 5).toString("latin1") === "%PDF-",
+      short(pdf.data)
+    );
   } finally {
     fs.rmSync(pastaDl, { recursive: true, force: true });
   }

@@ -1,4 +1,5 @@
 #include "totvs.ch"
+#include "rptdef.ch"
 
 Static cStatico := "valor estatico"
 
@@ -90,3 +91,37 @@ registrou o WebAgent da sessao, para o E2E do WebAgent.
 User Function zTstDbgW()
     Local cTmp := GetTempPath(.T.)
 Return cTmp
+
+/*/{Protheus.doc} zTstDbgP
+Gera um PDF de uma pagina com FWMSPrinter e manda ao navegador do webapp,
+para o E2E conferir o PDF em arquivosBaixados. O FWMSPrinter precisa de
+ambiente aberto (usuario, empresa), por isso o RpcSetEnv na empresa 99 filial 01
+do ambiente de desenvolvimento. Nome unico por execucao, para nao cair no
+dialogo de arquivo ja existente.
+@type function
+@author tds-mcp
+@since 16/10/2026
+@return logical, sempre .T.
+/*/
+User Function zTstDbgP()
+    Local cArq  := "ztstdbgp_" + StrTran(Time(), ":", "")
+    Local oFont := Nil
+    Local oPrn  := Nil
+    RpcSetType(3)
+    RpcSetEnv("99", "01")
+    oFont := TFont():New("Arial",, -12,, .T.)
+    oPrn  := FWMSPrinter():New(cArq, IMP_PDF, .F.,, .T.,,,,,,, .T.)
+    oPrn:SetResolution(72)
+    oPrn:SetPortrait()
+    oPrn:SetPaperSize(DMPAPER_A4)
+    oPrn:SetMargin(30, 30, 30, 30)
+    oPrn:cPathPDF := GetTempPath()
+    oPrn:StartPage()
+    oPrn:Say(60, 20, "PDF de teste do tds-mcp", oFont,, CLR_BLACK)
+    oPrn:EndPage()
+    oPrn:SetViewPDF(.T.)
+    oPrn:Print()
+    FreeObj(oFont)
+    FreeObj(oPrn)
+    RpcClearEnv()
+Return .T.

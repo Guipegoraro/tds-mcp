@@ -334,7 +334,9 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 - `patchesRoot` — raiz da árvore de patches (padrão `C:\TOTVS\patches`)
 - `advplsPath` — só se o advpls não estiver na extensão instalada (sem ele, usa a extensão
   tds-vscode de maior versão; `tds_server_log` mostra qual binário está em uso). Também aceita a variável
-  de ambiente `TDS_MCP_ADVPLS`
+  de ambiente `TDS_MCP_ADVPLS`. O advpls da extensão 2.1.6 (tds-ls 2.2.7) espera 30 s a cada subida
+  ([issue #1536](https://github.com/totvs/tds-vscode/issues/1536)), e o `tds_syntax_check` estoura o
+  prazo: aponte para o advpls de outra versão (o pacote `.vsix` da release, extraído numa pasta própria).
 - `credentials` — **senhas em texto plano**. Prefira deixar vazio e usar o token do TDS.
   O arquivo fica fora do repositório; nunca o versione.
 - `webappUrls` — URL do webapp por servidor, quando não for `http(s)://<endereço>:<porta>/webapp/`
@@ -343,7 +345,12 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
 - `debugIdleMinutes` — minutos sem uso até a sessão de depuração encerrar (padrão 10; no modo
   navegador vale o triplo, porque o uso das telas pelo chrome-devtools não passa pelo tds-mcp)
 - `debugAdapterPath`, `chromiumPath` — só se o debugAdapter ou o navegador não forem
-  encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`)
+  encontrados (também `TDS_MCP_DEBUG_ADAPTER` e `TDS_MCP_CHROMIUM`). Para o navegador headless,
+  o `chrome-headless-shell` do [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
+  gasta uns 100 MB a menos por execução que o Chromium e abre com metade da CPU, sem perder nada
+  nos testes (webapp, WebAgent, downloads e PDF do FWMSPrinter). Ele não tem janela: serve para o
+  `chromiumPath`, não para o chrome-devtools do modo navegador. O binário vem sem assinatura
+  digital e não se atualiza sozinho.
 - `webAgentPath` — WebAgent compatível com o webapp dos servidores, quando não for o instalado
   (também `TDS_MCP_WEBAGENT`)
 
