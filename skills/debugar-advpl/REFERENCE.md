@@ -248,6 +248,30 @@ fontes, servidor e ambiente. Fonte fora do registro sai apenas com
 `foraDoRegistro: true` quando o usuário pede aquele fonte pelo nome; objeto oficial
 TOTVS é sempre recusado.
 
+## Print do teste de tela
+
+Vale para todo teste em que o agente abre uma tela e a confere: rotina Protheus no modo
+navegador e app PO-UI no chrome-devtools. O headless não tem imagem (só `tela` e `botoes`
+em texto): ali não há print, e o relato diz isso.
+
+1. Na tela que prova o resultado do teste (tela final, diálogo, erro), `take_screenshot`
+   com `filePath` na pasta temporária da sessão (o scratchpad; sem ele, `%TEMP%`), nome
+   `<rotina>-<aaaammdd-hhmmss>.png`. Um print por tela que prova algo, não um por passo.
+2. Destino:
+   - **O teste é de um card**, em qualquer status (implementação, revisão, QA, gate): na
+     pasta do board (a que tem `.ordna/`), `ordna attach <id> <arquivo.png>`. O ordna copia
+     a imagem para `tasks/attachments/<id>/` e a registra no frontmatter do card; apague o
+     arquivo temporário depois. Acrescente em `## Notes` do card uma linha com a data, o
+     que o print mostra e o que ele prova. Teste de um plano sem saber de qual card:
+     pergunte ao usuário.
+   - **Sem card** (teste avulso, sem plano): abra no visualizador, que apaga o arquivo
+     quando o usuário fecha a janela. Pela tool PowerShell, sem esperar a janela fechar:
+     ```powershell
+     Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile', '-File', "`"$HOME\.claude\skills\debugar-advpl\scripts\ver-print.ps1`"", "`"<arquivo.png>`""
+     ```
+3. No relato, diga onde o print ficou: card e id do anexo (`a1`, `a2`...), ou "aberto no
+   visualizador".
+
 ## Problemas comuns
 
 - **`tds_use_server` falha com "Server returned a non numeric value"**: o AppServer não

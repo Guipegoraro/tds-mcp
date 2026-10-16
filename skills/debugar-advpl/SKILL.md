@@ -109,7 +109,8 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
    vier `executando`. A cada `executando`, leia a tela (`tela`/`botoes` no headless,
    `take_snapshot` no navegador): um diálogo esperando resposta não termina sozinho. No
    headless não há como responder a ele: encerre e ajuste o fonte ou use o modo
-   navegador.
+   navegador. Na tela que prova o resultado do teste, tire o print e mande ao card ou ao
+   visualizador (REFERENCE.md, "Print do teste de tela").
 
 6. **Inspeção — o motivo da sessão.** Leia local, pilha, variáveis e `alteradas`;
    aprofunde com `tds_debug_variables` (chamadores pelo `frame`, `Public`, `Table`),
@@ -143,7 +144,7 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
 ## Relato
 
 Relate o observado: linha, valores das variáveis relevantes, o que mudou entre paradas,
-erro com fonte/linha, arquivos gerados (`arquivosBaixados`). Quando a rotina depende do
+erro com fonte/linha, arquivos gerados (`arquivosBaixados`), onde ficou o print da tela. Quando a rotina depende do
 WebAgent (pedido com `webAgent: true` ou ligado pelo modo navegador) e o retorno trouxe
 `webAgent.ativo: false`, diga que o caminho do agente não foi testado e que a rotina pode
 ter seguido o outro ramo. Separe observado de
