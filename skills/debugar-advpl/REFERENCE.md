@@ -315,8 +315,8 @@ em texto): ali não há print, e o relato diz isso.
   mesmo ou em outro AppServer) com SpecialKey diferente. Quem divide o Protheus_data usa a
   mesma SpecialKey: o `\SEMAFORO\SPECIAL.KEY` guarda uma só, o error.log registra
   "Problemas na configuração da chave SpecialKey" e o login pode falhar e passar
-  alternadamente. O motivo exato está no console.log do AppServer. Avise o usuário e não repita em laço: um login que passa depois de falhar
-  não tira o conflito.
+  alternadamente. O motivo exato está no console.log do AppServer. Avise o usuário e não
+  repita em laço: um login que passa depois de falhar não tira o conflito.
 - **chrome-devtools responde "The browser is already running for ...chrome-profile"**: outra
   sessão do Claude está com o navegador do perfil compartilhado. O MCP chrome-devtools
   precisa do argumento `--isolated` (README do tds-mcp); avise o usuário, que reconecta o
@@ -340,8 +340,8 @@ em texto): ali não há print, e o relato diz isso.
 - **Chamada que passa de ~100 s** pode ir para segundo plano no cliente: use
   `timeoutSeg`/`aguardarSeg` até 100 e repita o `tds_debug_wait`.
 - **Webapp em porta própria**: o padrão é `http(s)://<endereço>:<porta>/webapp/` (porta
-  multiprotocolo; `https` quando a validação do servidor detecta TLS, sem depender do `secure` gravado
-  no servers.json); outra URL vai em `webappUrls` no `~/.tds-mcp/config.json`, por nome
+  multiprotocolo; `https` quando a validação do servidor detecta TLS e, se ela não
+  responder, conforme o `secure` do servers.json); outra URL vai em `webappUrls` no `~/.tds-mcp/config.json`, por nome
   do servidor no servers.json do TDS:
   `"webappUrls": { "NomeDoServidor": "http://host:porta/webapp/" }`.
 - **`Array {size=NIL}` num frame chamador**: expanda com `caminho` para ver os itens.
