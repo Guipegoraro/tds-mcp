@@ -604,7 +604,7 @@ let logSeq = 0;
 
 /**
  * Remove sobras de processos que terminaram sem limpar, com mais de uma hora:
- * logs de adaptador e perfis do Chromium headless. O log de uma sessão viva
+ * logs de adaptador, perfis do Chromium headless e pastas do WebAgent e do PPO. O log de uma sessão viva
  * (deste ou de outro tds-mcp) está aberto pelo adaptador e o Windows recusa a
  * remoção. No perfil, o navegador vivo mantém o `lockfile` aberto: se ele não
  * puder ser removido, a pasta inteira fica.
@@ -617,7 +617,7 @@ function removeStaleArtifacts(logDir: string): void {
       if (fs.statSync(alvo).mtimeMs >= limite) continue;
       if (/^debugAdapter-[\d-]+\.log$/.test(name)) {
         fs.rmSync(alvo, { force: true });
-      } else if (/^webagent-/.test(name)) {
+      } else if (/^(webagent|ppo)-/.test(name)) {
         fs.rmSync(alvo, { recursive: true, force: true });
       } else if (/^chromium-profile/.test(name)) {
         fs.rmSync(path.join(alvo, "lockfile"), { force: true });

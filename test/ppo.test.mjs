@@ -32,7 +32,8 @@ function check(nome, ok, detalhe) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${nome}${detalhe ? `\n      ${detalhe}` : ""}`);
 }
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-ppo-"));
+// O $& no nome da pasta confere que o caminho entra literal na troca do #line.
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsmcp-ppo $& "));
 const tmpBase = path.join(os.tmpdir(), "tds-mcp");
 const ppoDirs = () => (fs.existsSync(tmpBase) ? fs.readdirSync(tmpBase).filter((n) => n.startsWith("ppo-")) : []);
 const antes = new Set(ppoDirs());

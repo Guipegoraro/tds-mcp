@@ -45,7 +45,9 @@ function literalComChr(conteudo: string, aspas: string): string | undefined {
 export function recusaAcento(expressao: string, onde: string): string | undefined {
   if (!/[^\x00-\x7f]/.test(expressao)) return undefined;
   let saida = "";
-  let convertivel = true;
+  // Colchete também delimita texto em AdvPL ([ele disse "não"]): com aspas dentro
+  // dele, a troca cairia no meio de um literal, então não há forma pronta.
+  let convertivel = !/\[[^\]]*["'][^\]]*\]/.test(expressao);
   let i = 0;
   while (i < expressao.length) {
     const c = expressao[i];

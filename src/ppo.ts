@@ -55,7 +55,12 @@ export async function gerarPpo(advplsPath: string, arquivo: string, includes: st
     if (erros.length > 0) return { erros };
     return { ppo: trocarCaminho(texto!, dir, path.dirname(original)), erros: [] };
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // O advpls morto por tempo esgotado pode ainda segurar arquivo da pasta por um instante.
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      /* a sobra sai na varredura de temporários do próximo tds_debug_start (removeStaleArtifacts) */
+    }
   }
 }
 
@@ -65,7 +70,8 @@ function trocarCaminho(texto: string, temporaria: string, original: string): str
   let saida = texto;
   for (const v of variantes) {
     const escapado = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    saida = saida.replace(new RegExp(escapado, "gi"), original);
+    // Função como substituição: o caminho entra literal, mesmo com $ no nome da pasta.
+    saida = saida.replace(new RegExp(escapado, "gi"), () => original);
   }
   return saida;
 }

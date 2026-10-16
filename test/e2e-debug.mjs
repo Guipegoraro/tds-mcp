@@ -81,7 +81,7 @@ try {
     "tds_run: erro de execução -> resultado erro com fonte/linha e detalhes",
     err.isError && err.data?.resultado === "erro" && /NVARNAOEXISTEE2E/i.test(err.data?.erro ?? "") &&
       new RegExp(`ZTSTDBG1\\.PRW\\(${L_ERRO}\\)`, "i").test(err.data?.erro ?? "") && /STACK U_ZTSTDBGE/i.test(err.data?.detalhes ?? ""),
-    short({ erro: err.data?.erro, temDetalhes: !!err.data?.detalhes })
+    short({ resultado: err.data?.resultado, erro: err.data?.erro, temDetalhes: !!err.data?.detalhes, tela: err.data?.tela })
   );
 
   // --- depuração

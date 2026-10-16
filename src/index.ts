@@ -1510,7 +1510,7 @@ const breakpointSchema = z.object({
     .optional()
     .describe(
       "Logpoint do depurador TOTVS: registra sem parar, mas só interpola {nomeDeVariavel} e valor " +
-        "caractere sai vazio. Para texto ou expressões, prefira rastro."
+        "caractere sai vazio. Para texto ou expressões, prefira rastro. Acento no texto do log sai como ?."
     ),
   rastro: z
     .array(z.string())
