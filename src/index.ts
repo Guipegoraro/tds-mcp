@@ -28,6 +28,7 @@ import { resolveChromiumPath } from "./webapp.js";
 import { resolveWebAgentPath, SCRIPT_PORTA_AGENTE } from "./webagent.js";
 import { lintFiles } from "./linter.js";
 import { gerarPpo } from "./ppo.js";
+import { recusaAcento } from "./acento.js";
 import { DebugManager, pastaDownloadsPadrao, type BreakpointSpec, type DebugMode } from "./debug.js";
 import { breakpointLineWarnings } from "./breakpointLines.js";
 import { programaInicial } from "./modulos.js";
@@ -1422,6 +1423,20 @@ function webAgentDaExecucao(pedido: boolean): { webAgentExe?: string; webAgentMo
       };
 }
 
+/** Recusa expressões do depurador com acento (ver acento.ts); junta as mensagens de todas. */
+function recusarAcentos(itens: { expressao: string | undefined; onde: string }[]): void {
+  const motivos = itens.flatMap((i) => (i.expressao ? [recusaAcento(i.expressao, i.onde)] : [])).filter(Boolean);
+  if (motivos.length) throw new Error(motivos.join("\n"));
+}
+
+/** Condições e rastros dos breakpoints, para a checagem de acento. */
+function expressoesDosBreakpoints(bps: { linha: number; condicao?: string; rastro?: string[] }[]) {
+  return bps.flatMap((b) => [
+    { expressao: b.condicao, onde: `a condição do breakpoint da linha ${b.linha}` },
+    ...(b.rastro ?? []).map((r) => ({ expressao: r, onde: `o rastro da linha ${b.linha}` })),
+  ]);
+}
+
 async function startDebug(args: {
   programa: string;
   argumentos?: string[];
@@ -1446,6 +1461,7 @@ async function startDebug(args: {
   if (args.pastaDownloads && !path.isAbsolute(args.pastaDownloads)) {
     throw new Error(`pastaDownloads precisa ser um caminho absoluto: ${args.pastaDownloads}`);
   }
+  recusarAcentos(expressoesDosBreakpoints(args.breakpoints ?? []));
   const inicial = programaInicial(args.programa, args.argumentos ?? [], args.modulo);
   const { session } = await ensureClient();
   const active = session.required();
@@ -1485,7 +1501,10 @@ async function startDebug(args: {
 const breakpointSchema = z.object({
   arquivo: z.string().describe("Caminho local do fonte (.prw/.tlpp); casa com o RPO pelo nome do arquivo"),
   linha: z.number().int().min(1).describe("Linha (1 = primeira)"),
-  condicao: z.string().optional().describe("Expressão AdvPL; para só quando verdadeira (ex.: nI == 2)"),
+  condicao: z
+    .string()
+    .optional()
+    .describe("Expressão AdvPL; para só quando verdadeira (ex.: nI == 2). Expressão com acento é recusada (o depurador o troca por ?) e volta com a forma em Chr() pronta."),
   log: z
     .string()
     .optional()
@@ -1499,7 +1518,7 @@ const breakpointSchema = z.object({
     .describe(
       "Ponto de rastro: ao passar na linha, avalia estas expressões (inclusive texto e funções), " +
         "registra os valores em mensagens (nivel RASTRO) e continua sem parar. Ex.: [\"cArg\", \"Len(aItens)\"]. " +
-        "Acento escrito na expressão chega ao servidor como ?: use Chr()"
+        "Expressão com acento é recusada (o depurador o troca por ?) e volta com a forma em Chr() pronta."
     ),
   contagem: z.string().optional().describe("Para só a partir da N-ésima passagem (ex.: '3')"),
 });
@@ -1718,6 +1737,7 @@ server.registerTool(
   safe(async ({ arquivo, breakpoints }) => {
     const s = debugManager.require();
     s.touch();
+    recusarAcentos(expressoesDosBreakpoints(breakpoints));
     if (!fs.existsSync(arquivo)) throw new Error(`Fonte não encontrado: ${arquivo}`);
     const avisos = [
       ...(await sourceFreshness(breakpoints.length ? [path.resolve(arquivo)] : [])),
@@ -1763,13 +1783,16 @@ server.registerTool(
       "aparece no escopo Local como SELF; se ::prop vier NIL, confira com self:prop. ATENÇÃO: roda " +
       "código de verdade no servidor — função com efeito colateral (RecLock, gravação) executa. " +
       "String marcada como UTF-8 pelo AppServer (ex.: EncodeUTF8) vem com o prefixo [UTF8]; em sessão aberta com detalheTexto=true, " +
-      "resultado string traz `detalhe` com os bytes. Acento escrito na expressão chega ao servidor " +
-      "como \"?\": monte o texto com Chr() (\"a\" + Chr(231) + Chr(227) + \"o\").",
+      "resultado string traz `detalhe` com os bytes. Expressão com acento é recusada (o depurador " +
+      "o troca por \"?\" e a comparação daria falso) e volta com a forma em Chr() pronta para reenviar.",
     inputSchema: {
       expressao: z.string().min(1),
     },
   },
-  safe(async ({ expressao }) => jsonResult({ expressao, ...(await debugManager.require().evaluate(expressao)) }))
+  safe(async ({ expressao }) => {
+    recusarAcentos([{ expressao, onde: "a expressão" }]);
+    return jsonResult({ expressao, ...(await debugManager.require().evaluate(expressao)) });
+  })
 );
 
 server.registerTool(
@@ -1779,8 +1802,7 @@ server.registerTool(
     description:
       "Mantém a lista de expressões observadas: cada parada (tds_debug_wait/step) devolve o valor " +
       "atual delas em `watches` e aponta em `alteradas` o que mudou. Use expressões sem efeito " +
-      "colateral (variáveis, campos, Len(...)). Acento escrito na expressão chega ao servidor como ?: " +
-      "use Chr().",
+      "colateral (variáveis, campos, Len(...)). Expressão com acento é recusada (o depurador o troca por ?) e volta com a forma em Chr() pronta.",
     inputSchema: {
       adicionar: z.array(z.string()).optional().default([]),
       remover: z.array(z.string()).optional().default([]),
@@ -1790,6 +1812,7 @@ server.registerTool(
   safe(async ({ adicionar, remover, limpar }) => {
     const s = debugManager.require();
     s.touch();
+    recusarAcentos((adicionar ?? []).map((w) => ({ expressao: w, onde: `o watch ${w}` })));
     if (limpar) s.watches = [];
     s.watches = s.watches.filter((w) => !(remover ?? []).includes(w));
     for (const w of adicionar ?? []) if (!s.watches.includes(w)) s.watches.push(w);

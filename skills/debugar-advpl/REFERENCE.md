@@ -265,9 +265,12 @@ String que o AppServer marcou como UTF-8 (ex.: retorno de `EncodeUTF8`) vem com 
   item no formato `ç [0xe7] [231]` (até 300 em `bruto` e em `bytes`; o resto dos bytes
   conta em `bytesOmitidos`). Se o depurador não responder, vem `erro` no `detalhe`.
 - Toda string aparece com `(+)` nas variáveis da sessão; o valor não muda.
-- Acento escrito em expressão (`tds_debug_evaluate`, `rastro` e watches; condição de
-  breakpoint não medida) chega ao servidor como `?` (`"ação"` vira `"a??o"`): monte o
-  texto com `Chr()`, `"a" + Chr(231) + Chr(227) + "o"`.
+- Acento escrito em expressão chega ao servidor como `?` (`"ação"` vira `"a??o"`), e a
+  comparação dá falso sem erro. Por isso o tds-mcp recusa expressão com acento no
+  `tds_debug_evaluate`, nos watches, no `rastro` e na `condicao` do breakpoint, e devolve
+  a forma com `Chr()` pronta (`"a" + Chr(231) + Chr(227) + "o"`): reenvie a forma
+  devolvida. Acento fora de aspas, entre colchetes ou caractere fora do CP1252 vem sem
+  forma pronta.
 
 ## Fontes temporários
 
