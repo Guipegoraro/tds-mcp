@@ -70,6 +70,8 @@ export interface StartOptions {
   webAgentExe?: string;
   /** Por que o WebAgent pedido não será usado (ex.: nenhum encontrado). */
   webAgentMotivo?: string;
+  /** Execução do tds_run: a sessão acaba com o programa ou no prazo, sem tds_debug_stop. */
+  porTdsRun?: boolean;
 }
 
 interface Snapshot {
@@ -105,6 +107,7 @@ export class DebugSession {
   readonly servidor: string;
   readonly ambiente: string;
   readonly iniciadaEm = new Date();
+  readonly porTdsRun: boolean;
   readonly pastaDownloads?: string;
   /** Instância do WebAgent ligada a esta execução. */
   agente?: WebAgentInstance;
@@ -127,6 +130,7 @@ export class DebugSession {
     this.dap = dap;
     this.modo = opts.modo;
     this.programa = opts.descricao ?? opts.programa;
+    this.porTdsRun = opts.porTdsRun ?? false;
     this.pastaDownloads = opts.pastaDownloads;
     this.webAgentMotivo = opts.webAgentMotivo;
     this.servidor = opts.active.def.name;
@@ -576,12 +580,25 @@ export function pastaDownloadsPadrao(): string {
   return path.join(os.tmpdir(), "tds-mcp", "downloads", `${stamp}_${process.pid}_${++logSeq}`);
 }
 
+interface Ocupacao {
+  programa: string;
+  servidor: string;
+  desde: Date;
+  porTdsRun: boolean;
+}
+
+function ocupacaoDe(s: DebugSession): Ocupacao {
+  return { programa: s.programa, servidor: s.servidor, desde: s.iniciadaEm, porTdsRun: s.porTdsRun };
+}
+
+const hhmm = (d: Date) => d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
 /** Uma sessão por vez; encerra sozinha após inatividade e ao sair do processo. */
 export class DebugManager {
   current?: DebugSession;
   private idleTimer?: NodeJS.Timeout;
   /** Vaga reservada por um start em andamento. */
-  private starting?: { programa: string; servidor: string; desde: Date };
+  private starting?: Ocupacao;
 
   /** Sessão retirada de `current` cujo encerramento ainda está em andamento. */
   private stopping?: DebugSession;
@@ -621,25 +638,53 @@ export class DebugManager {
     return this.current;
   }
 
+  /** Sessão aberta ou iniciando (tds_debug_start ou tds_run). */
+  private emUso(): Ocupacao | undefined {
+    if (this.starting) return this.starting;
+    const s = this.current && !this.current.encerrada ? this.current : undefined;
+    return s && ocupacaoDe(s);
+  }
+
+  /**
+   * Motivo para recusar `acao` (compilar, mexer em patch, remover do RPO)
+   * enquanto uma sessão deste tds-mcp está aberta, iniciando ou encerrando: a
+   * thread segue no AppServer até o adaptador e o navegador saírem (fim do
+   * stop()). undefined quando não há.
+   */
+  recusaNaDepuracao(acao: string): string | undefined {
+    const uso = this.emUso();
+    const encerrando = !uso && this.stopping !== undefined;
+    const o = uso ?? (encerrando ? ocupacaoDe(this.stopping!) : undefined);
+    if (!o) return undefined;
+    const quem = `${o.programa} em ${o.servidor} (desde ${hhmm(o.desde)})`;
+    if (encerrando) {
+      return `Recusado durante a depuração: a sessão de ${quem} está sendo encerrada; tente ${acao} de novo em alguns segundos.`;
+    }
+    if (o.porTdsRun) {
+      return `Recusado durante a depuração: o tds_run de ${quem} está em andamento; espere ele terminar antes de ${acao}.`;
+    }
+    return `Recusado durante a depuração: a sessão de ${quem} está aberta neste tds-mcp; encerre com tds_debug_stop antes de ${acao}.`;
+  }
+
   /**
    * Uma sessão por vez. A vaga é reservada antes de qualquer await: duas
    * chamadas simultâneas (tds_run, tds_debug_start) não podem ambas passar na
    * conferência e deixar um debugAdapter órfão.
    */
   async start(opts: StartOptions): Promise<{ session: DebugSession; breakpoints: Record<string, unknown> }> {
-    const ocupada =
-      this.starting ??
-      (this.current && !this.current.encerrada
-        ? { programa: this.current.programa, servidor: this.current.servidor, desde: this.current.iniciadaEm }
-        : undefined);
+    const ocupada = this.emUso();
     if (ocupada) {
-      const hora = ocupada.desde.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       throw new Error(
-        `Depurador ocupado: ${ocupada.programa} em ${ocupada.servidor} desde ${hora}. ` +
+        `Depurador ocupado: ${ocupada.programa} em ${ocupada.servidor} desde ${hhmm(ocupada.desde)}. ` +
           `Encerre com tds_debug_stop ou aguarde a execução terminar.`
       );
     }
-    this.starting = { programa: opts.descricao ?? opts.programa, servidor: opts.active.def.name, desde: new Date() };
+    this.starting = {
+      programa: opts.descricao ?? opts.programa,
+      servidor: opts.active.def.name,
+      desde: new Date(),
+      porTdsRun: opts.porTdsRun ?? false,
+    };
     try {
       return await this.launchSession(opts);
     } finally {

@@ -110,7 +110,7 @@ try {
   await call("tds_debug_stop");
   check(
     "remoção é recusada com depuração ativa",
-    emDebug.isError && /depuração ativa/.test(emDebug.data?.erro ?? "") && (await noRpo("ZTSTDEL1.PRW")),
+    emDebug.isError && /Recusado durante a depuração/.test(emDebug.data?.erro ?? "") && (await noRpo("ZTSTDEL1.PRW")),
     short(emDebug.data)
   );
 

@@ -187,6 +187,21 @@ function safe<A extends unknown[]>(fn: (...args: A) => Promise<{ content: { type
   };
 }
 
+/** Trecho das descrições das tools recusadas durante a depuração. */
+const RECUSA_NA_DEPURACAO =
+  " Recusada enquanto há sessão de depuração deste tds-mcp aberta (tds_debug_start) ou tds_run em " +
+  "andamento: encerre com tds_debug_stop ou espere o tds_run terminar.";
+
+/**
+ * Recusa o que mexe no RPO ou em patch enquanto um programa deste tds-mcp está
+ * sob o depurador: a compilação pode falhar no meio ou trocar o fonte parado no
+ * breakpoint. O TDS recusa as mesmas operações, menos a geração de patch.
+ */
+function recusarDuranteDepuracao(acao: string): void {
+  const motivo = debugManager.recusaNaDepuracao(acao);
+  if (motivo) throw new Error(motivo);
+}
+
 function defaultCompileOptions(): CompileOptions {
   return {
     recompile: false,
@@ -374,7 +389,7 @@ server.registerTool(
       "temporario=true para fonte que não faz parte da entrega (wrapper de teste, fonte de " +
       "experimento): ele entra no registro de temporários e pode ser removido depois com " +
       "tds_rpo_delete. Compilar o mesmo fonte sem a marca tira ele do registro. Nomeie o " +
-      "temporário com o `prefixoWrapper` de tds_use_server; sem ele vem `avisoNome`.",
+      "temporário com o `prefixoWrapper` de tds_use_server; sem ele vem `avisoNome`." + RECUSA_NA_DEPURACAO,
     inputSchema: {
       arquivos: z.array(z.string()).min(1).describe("Caminhos de fontes ou pastas"),
       recompile: z.boolean().optional().default(false).describe("Forçar recompilação"),
@@ -389,6 +404,7 @@ server.registerTool(
     },
   },
   safe(async ({ arquivos, recompile, aceitarMisto, temporario }) => {
+    recusarDuranteDepuracao("compilar");
     const options = defaultCompileOptions();
     options.recompile = recompile ?? false;
     const { active, expanded, verdict, logDaOperacao, mistoAceito } = await runCompilation(
@@ -515,14 +531,18 @@ server.registerTool(
     title: "Gerar PPO (fonte pré-processado)",
     description:
       "Retorna o fonte após o pré-processador (resolução de #include/#define). " +
-      "Útil para depurar problemas de defines e includes.",
+      "Útil para depurar problemas de defines e includes. GRAVA NO RPO: recompila o fonte no " +
+      "servidor para isso, e a versão local do arquivo substitui a que estiver no RPO; peça licença " +
+      "como numa compilação." +
+      RECUSA_NA_DEPURACAO,
     inputSchema: {
       arquivo: z.string().describe("Caminho do fonte"),
       aceitarMisto: ACEITAR_MISTO_SCHEMA,
     },
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false },
   },
   safe(async ({ arquivo, aceitarMisto }) => {
+    recusarDuranteDepuracao("gerar o PPO");
     const options = defaultCompileOptions();
     options.recompile = true;
     options.returnPpo = true;
@@ -634,8 +654,9 @@ server.registerTool(
       "sem apagar nada. " +
       "foraDoRegistro=true libera fonte fora do registro: use SOMENTE quando o usuário pedir " +
       "explicitamente a remoção daquele fonte. Objeto oficial TOTVS (status de produção no RPO) é " +
-      "sempre recusado. Recusada enquanto houver sessão de depuração ativa (tds_run não deixa " +
-      "sessão). Confere antes que todos os nomes estão no RPO (um ausente recusa a lista inteira) " +
+      "sempre recusado." +
+      RECUSA_NA_DEPURACAO +
+      " Confere antes que todos os nomes estão no RPO (um ausente recusa a lista inteira) " +
       "e, depois, que saíram: retorno com `removidos` e, se algo ficou, `naoRemovidos` e " +
       "`logDoServidor`. Antes de remover, pergunte ao usuário citando fontes, servidor e ambiente, " +
       "mesmo quando ele pediu a remoção: a tool age no servidor conectado.",
@@ -653,9 +674,7 @@ server.registerTool(
     annotations: { destructiveHint: true },
   },
   safe(async ({ fontes, foraDoRegistro }) => {
-    if (debugManager.current && !debugManager.current.encerrada) {
-      throw new Error("Há uma sessão de depuração ativa: encerre com tds_debug_stop antes de remover fontes do RPO.");
-    }
+    recusarDuranteDepuracao("remover fontes do RPO");
     const { client, session } = await ensureClient();
     const active = session.required();
     const nomes = [...new Set(fontes.map(nomeNoRpo))];
@@ -799,7 +818,8 @@ server.registerTool(
       "tcloud (até 60 caracteres), devolvido em tituloTcloud. Retorna também título e descrição " +
       "recomendados — o título começa com data e hora. No manifesto/retorno, rpoDate de cada " +
       "fonte é o mtime do arquivo-fonte na compilação (semântica de tds_rpo_objects), não o " +
-      "instante da compilação.",
+      "instante da compilação." +
+      RECUSA_NA_DEPURACAO,
     inputSchema: {
       fontes: z
         .array(z.string())
@@ -833,6 +853,7 @@ server.registerTool(
     },
   },
   safe(async ({ fontes, cliente, ticket, customizacao, tituloTcloud, descricao, pastaFontesLocais }) => {
+    recusarDuranteDepuracao("gerar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
     const cfg = readServersJson();
@@ -965,13 +986,15 @@ server.registerTool(
       "Valida um arquivo de patch contra o RPO do ambiente conectado, sem aplicar. " +
       "Aponta fontes do patch mais antigos que o RPO. Gate recomendado antes de tds_patch_apply. " +
       "As datas comparadas (dataPatch/dataRPO) seguem a semântica de mtime do arquivo-fonte na " +
-      "compilação, não do instante de compilação.",
+      "compilação, não do instante de compilação." +
+      RECUSA_NA_DEPURACAO,
     inputSchema: {
       arquivoPatch: z.string().describe("Caminho local do .ptm/.upd/.pak"),
     },
     annotations: { readOnlyHint: true },
   },
   safe(async ({ arquivoPatch }) => {
+    recusarDuranteDepuracao("validar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
     const cfg = readServersJson();
@@ -1047,7 +1070,8 @@ server.registerTool(
     description:
       "APLICA um patch no RPO do ambiente conectado (operação de deploy — altera o ambiente). " +
       "Por padrão aplica somente fontes mais novos; use aplicarAntigos=true para forçar. " +
-      "Recomenda-se tds_patch_validate antes.",
+      "Recomenda-se tds_patch_validate antes." +
+      RECUSA_NA_DEPURACAO,
     inputSchema: {
       arquivoPatch: z.string().describe("Caminho local do .ptm/.upd/.pak"),
       aplicarAntigos: z
@@ -1059,6 +1083,7 @@ server.registerTool(
     annotations: { destructiveHint: true },
   },
   safe(async ({ arquivoPatch, aplicarAntigos }) => {
+    recusarDuranteDepuracao("aplicar patch");
     const { client, session } = await ensureClient();
     const active = session.required();
     const cfg = readServersJson();
@@ -1416,6 +1441,7 @@ async function startDebug(args: {
   pastaFontes?: string;
   pastaDownloads?: string;
   webAgent?: boolean;
+  porTdsRun?: boolean;
 }) {
   if (args.modulo && args.modo !== "navegador") {
     throw new Error(
@@ -1459,6 +1485,7 @@ async function startDebug(args: {
     pastaDownloads:
       args.modo === "navegador" ? undefined : args.pastaDownloads ?? pastaDownloadsPadrao(),
     ...webAgentDaExecucao(args.webAgent ?? args.modo === "navegador"),
+    porTdsRun: args.porTdsRun,
   });
   return { ...started, avisos };
 }
@@ -1841,7 +1868,7 @@ server.registerTool(
   },
   safe(async ({ programa, argumentos, timeoutSeg, pastaDownloads, webAgent }) => {
     const t0 = Date.now();
-    const { session: s } = await startDebug({ programa, argumentos, modo: "headless", pastaDownloads, webAgent });
+    const { session: s } = await startDebug({ programa, argumentos, modo: "headless", pastaDownloads, webAgent, porTdsRun: true });
     try {
       const fim = await s.waitForStop(timeoutSeg ?? 60);
       const duracaoSeg = Math.round((Date.now() - t0) / 100) / 10;
