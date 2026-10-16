@@ -1601,6 +1601,9 @@ server.registerTool(
                 ? `Abra em duas chamadas do chrome-devtools: new_page com url "about:blank" e isolatedContext "${contexto}"; ` +
                   "depois navigate_page nessa aba com url e initScript de abrirCom. "
                 : `Chame new_page do chrome-devtools com url e isolatedContext "${contexto}" de abrirCom. `) +
+              "O contexto isolado abre outra janela: com a aba desta sessão aberta, feche com close_page as " +
+              "outras abas em about:blank do list_pages que estejam sem isolatedContext ou com isolatedContext " +
+              "tds-* (a inicial do chrome-devtools e as de sessões encerradas), para ficar uma janela só. " +
               (modulo
                 ? "A tela pede login (usuário e senha do Protheus), depois confirma empresa/filial/data base, " +
                   "o aviso de ambiente e diálogos do módulo (ex.: Moedas): confirme cada um; a carga do módulo " +

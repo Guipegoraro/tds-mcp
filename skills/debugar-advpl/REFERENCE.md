@@ -13,9 +13,12 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
 2. Com `initScript`: `new_page` do chrome-devtools com `url: "about:blank"` e o
    `isolatedContext`, depois `navigate_page` nessa aba com a `url` e o `initScript`. Sem
    ele: `new_page` com `url` e `isolatedContext`. O contexto isolado é uma janela com
-   armazenamento limpo. No perfil normal o webapp lembra o último programa, troca a URL
-   pelo formulário "Parâmetros Iniciais" e roda o programa fora do depurador. O
-   `initScript` grava a porta do agente antes de o webapp carregar: aberta sem ele, a
+   armazenamento limpo. Com a aba da sessão aberta, `list_pages` e `close_page` de cada
+   outra aba em `about:blank` sem `isolatedContext` ou com `isolatedContext` `tds-*` (a
+   inicial do chrome-devtools e as de sessões encerradas): sem isso ficam duas janelas na
+   tela. Aba em outro contexto isolado é de outro trabalho: não feche. No perfil normal o
+   webapp lembra o último programa, troca a URL pelo formulário "Parâmetros Iniciais" e
+   roda o programa fora do depurador. O `initScript` grava a porta do agente antes de o webapp carregar: aberta sem ele, a
    página conecta no agente, mas o AppServer trata a sessão como sem agente e
    `ExecInClient` (porta serial, `MsOpenPort` etc.) volta vazio — o erro aparece como
    `array out of bounds [1] of [0]` em `MSSETPORTNAME` (MATXFUNA.PRX), mesmo com
@@ -41,8 +44,8 @@ tds-vscode 2.1.4 (tds-da 1.4.x), chrome-devtools-mcp 1.10 e AppServer 24.3 / rel
    `tds_debug_step continuar`, opere a tela de novo (MsgInfo, confirmações).
 5. Ao terminar, `tds_debug_stop` e `close_page` da aba `tds-<id>` (o retorno traz
    `fecharAba`; se ela for a última aba, o `close_page` recusa: `navigate_page` dela para
-   `about:blank`). O stop encerra a thread parada num breakpoint ali mesmo (o resto do
-   programa não roda); a que roda ou espera um
+   `about:blank`; a próxima sessão fecha essa aba no passo 2). O stop encerra a thread
+   parada num breakpoint ali mesmo (o resto do programa não roda); a que roda ou espera um
    diálogo continua no AppServer, já sem depurador, até a aba fechar. Cada sessão
    esquecida deixa também uma janela a mais. Aba `tds-<id>` levada para `about:blank`
    conta como fechada: a página saiu do webapp. A aba `about:blank` sem contexto isolado

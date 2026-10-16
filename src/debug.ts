@@ -278,8 +278,9 @@ export class DebugSession {
       fecharAba:
         `Feche a aba desta sessão no chrome-devtools: list_pages, ache a aba com isolatedContext=${this.contextoIsolado} ` +
         "e chame close_page com o pageId dela; se ela for a última aba (close_page recusa), use " +
-        "navigate_page dela para about:blank. Programa que não estava parado num breakpoint (rodando ou " +
-        "esperando um diálogo) e o WebAgent da sessão continuam até a página sair.",
+        "navigate_page dela para about:blank (a próxima sessão fecha essa aba ao abrir a dela). " +
+        "Programa que não estava parado num breakpoint (rodando ou esperando um diálogo) e o " +
+        "WebAgent da sessão continuam até a página sair.",
     };
   }
 

@@ -155,7 +155,9 @@ No modo navegador o tds-mcp devolve `abrirCom` (`url`, `isolatedContext` e, com 
 `initScript`) e `proximoPasso` com as chamadas do chrome-devtools: `new_page` em `about:blank` no
 contexto isolado e `navigate_page` com a `url` e o `initScript`. O contexto isolado é necessário:
 o perfil normal do navegador guarda o último programa, e o webapp então descarta os parâmetros da
-URL e roda o programa fora do depurador. O `initScript` grava a porta do agente no localStorage
+URL e roda o programa fora do depurador. O contexto isolado abre outra janela; o `proximoPasso`
+manda fechar as abas em `about:blank` que sobram (a inicial do chrome-devtools e as `tds-*` de
+sessões encerradas), e fica uma janela só. O `initScript` grava a porta do agente no localStorage
 antes de o webapp carregar: o webapp informa essa porta ao AppServer ao abrir a conexão, antes de o
 agente conectar, e sem ela o AppServer trata a sessão como sem agente (`ExecInClient`, como a porta
 serial, volta vazio). O Chromium headless do tds-mcp faz o mesmo sozinho. `tds_debug_wait` informa
