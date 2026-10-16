@@ -151,6 +151,10 @@ export class HeadlessWebapp {
         "--no-first-run",
         "--no-default-browser-check",
         "--remote-debugging-port=0",
+        // O webapp de um servidor remoto chama o WebAgent em 127.0.0.1; sem a
+        // flag o Chromium pede permissão de rede local, e no headless ninguém
+        // responde e a chamada falha.
+        "--disable-features=LocalNetworkAccessChecks",
         `--user-data-dir=${profileDir}`,
         "about:blank",
       ],
