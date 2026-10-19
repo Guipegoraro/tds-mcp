@@ -327,6 +327,10 @@ em texto): ali não há print, e o relato diz isso.
   sessão do Claude está com o navegador do perfil compartilhado. O MCP chrome-devtools
   precisa do argumento `--isolated` (README do tds-mcp); avise o usuário, que reconecta o
   MCP pelo `/mcp`. Enquanto isso, use o modo headless.
+- **Aviso "A resolução mínima indicada ... é 1024 x 768" ao abrir a página**: a janela do
+  chrome-devtools abriu menor que a tela. Feche o aviso (botão "Fechar") e siga; o programa
+  funciona. O argumento `--chromeArg=--start-maximized` no MCP chrome-devtools (README do
+  tds-mcp) evita o aviso: se ele faltar, conte ao usuário.
 - **Formulário "Parâmetros Iniciais" no lugar do programa**: a URL foi aberta fora do
   contexto isolado. Feche a aba e abra de novo com `new_page` + `isolatedContext`.
 - **Sessão de depuração encerrada sozinha**: depois de `debugIdleMinutes`

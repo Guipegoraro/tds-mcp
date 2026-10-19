@@ -171,11 +171,12 @@ serial, volta vazio). O Chromium headless do tds-mcp faz o mesmo sozinho. `tds_d
 AppServer o programa que não estava parado num breakpoint. O agente da sessão encerra quando a
 página sai do programa ou a aba fecha.
 
-Dois argumentos no MCP chrome-devtools ajudam o modo navegador:
+Três argumentos no MCP chrome-devtools ajudam o modo navegador:
 
 ```json
 "args": ["<...>/chrome-devtools-mcp.js", "--isolated",
-         "--chromeArg=--disable-features=LocalNetworkAccessChecks"]
+         "--chromeArg=--disable-features=LocalNetworkAccessChecks",
+         "--chromeArg=--start-maximized"]
 ```
 
 - `--isolated`: cada sessão do Claude sobe o próprio Chromium com perfil temporário. Sem ele, todas
@@ -184,6 +185,11 @@ Dois argumentos no MCP chrome-devtools ajudam o modo navegador:
 - `--disable-features=LocalNetworkAccessChecks`: o webapp de um AppServer remoto chama o WebAgent
   em 127.0.0.1, e o Chromium pede ao usuário a permissão "Acessar outros apps e serviços neste
   dispositivo" a cada servidor. O Chromium headless do tds-mcp já sobe com essa flag.
+- `--start-maximized`: sem ele a janela abre menor que a tela e, com a faixa de navegador
+  controlado por automação e a escala do Windows em 125%, a área da página fica abaixo de 768 px
+  de altura; o webapp avisa "A resolução mínima indicada para o funcionamento do sistema é
+  1024 x 768". Se o aviso continuar numa tela menor, `--chromeArg=--force-device-scale-factor=1`
+  desenha a página em escala 100% (texto menor na tela).
 
 Com `modulo` (código ou nome, ex.: `04` ou `SIGAEST`) a rotina roda pelo SIGABPM dentro do módulo,
 com o ambiente que o usuário tem no menu (empresa, filial, data base, variáveis do módulo). A tela
