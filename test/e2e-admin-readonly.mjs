@@ -3,7 +3,7 @@
 // tools que alteram o servidor (mensagem, desconexao).
 // Uso: node test/e2e-admin-readonly.mjs <servidor> [ambiente]
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(here, "..", "dist", "index.js")],
+  // As tools tds_monitor_* são desligadas por padrão.
+  env: { ...getDefaultEnvironment(), TDS_MCP_MONITOR: "1" },
 });
 const mcp = new Client({ name: "e2e-admin-readonly", version: "0.0.1" });
 await mcp.connect(transport);

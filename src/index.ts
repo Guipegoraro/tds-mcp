@@ -83,6 +83,17 @@ const ADVPL_RESOURCE_EXT = [".tres", ".png", ".bmp", ".res", ".js", ".rptdesign"
 const config = loadConfig();
 
 /**
+ * Tools tds_monitor_* ligadas (enableMonitor no config ou TDS_MCP_MONITOR=1),
+ * decidido na subida: as tools registradas não mudam com o MCP no ar.
+ */
+const MONITOR_LIGADO = config.enableMonitor === true || process.env.TDS_MCP_MONITOR === "1";
+
+/** O trecho que cita o monitor, só quando as tools tds_monitor_* estão ligadas. */
+function comMonitor(texto: string, semMonitor = ""): string {
+  return MONITOR_LIGADO ? texto : semMonitor;
+}
+
+/**
  * Relê o ~/.tds-mcp/config.json no mesmo objeto (o SessionManager guarda a
  * referência): credencial gravada depois de o MCP subir vale no próximo
  * tds_use_server, sem reconectar o MCP.
@@ -217,7 +228,7 @@ function reconectando<A extends unknown[], R>(repetir: boolean, fn: (...args: A)
       if (!repetir) {
         throw new Error(
           `${msg} A conexão com o servidor caiu e foi refeita, mas a operação não foi repetida: ` +
-            "confira o estado (tds_rpo_objects, ou tds_monitor_users para as ações do monitor) antes de chamar de novo."
+            `confira o estado (tds_rpo_objects${comMonitor(", ou tds_monitor_users para as ações do monitor")}) antes de chamar de novo.`
         );
       }
       return fn(...args);
@@ -409,7 +420,7 @@ server.registerTool(
       "(ex.: zTK3F); complete com 3 letras da rotina (zTK3FCal) para não colidir no RPO com o " +
       "wrapper de outro desenvolvedor. " +
       "`maquinaLocal` é o nome desta máquina: as execuções do tds_run e do tds_debug_start " +
-      "aparecem no tds_monitor_users com esse `computador` (compare sem diferenciar maiúsculas).",
+      "aparecem no monitor do AppServer com esse `computador` (compare sem diferenciar maiúsculas).",
     inputSchema: {
       servidor: z.string().describe("Nome (ou parte do nome) do servidor no servers.json"),
       ambiente: z.string().optional().describe("Ambiente; padrão: o último usado no TDS"),
@@ -1346,107 +1357,111 @@ const targetSchema = {
     .describe("Campo `servidor` da sessão em tds_monitor_users; só se a thread se repetir"),
 };
 
-server.registerTool(
-  "tds_monitor_users",
-  {
-    title: "Monitor: sessões conectadas",
-    description:
-      "Lista as sessões (threads) do AppServer conectado: usuário, computador, ambiente, " +
-      "programa, tempo de conexão/inatividade e memória. Filtros por substring, sem diferenciar " +
-      "maiúsculas. Abre uma conexão de monitor; exige privilégio de monitor no servidor.",
-    inputSchema: {
-      usuario: z.string().optional().describe("Filtro pelo nome do usuário"),
-      ambiente: z.string().optional().describe("Filtro pelo ambiente"),
-      programa: z.string().optional().describe("Filtro pelo programa (ex.: SIGAFAT, HTTP_START)"),
-      limite: z.number().int().min(1).optional().default(100).describe("Máximo de sessões retornadas"),
+// Desligadas por padrão: atrás de um balanceador, a conexão de monitor cai num
+// AppServer só e a lista omite as sessões dos outros, sem erro (ver README).
+if (MONITOR_LIGADO) {
+  server.registerTool(
+    "tds_monitor_users",
+    {
+      title: "Monitor: sessões conectadas",
+      description:
+        "Lista as sessões (threads) do AppServer conectado: usuário, computador, ambiente, " +
+        "programa, tempo de conexão/inatividade e memória. Filtros por substring, sem diferenciar " +
+        "maiúsculas. Abre uma conexão de monitor; exige privilégio de monitor no servidor.",
+      inputSchema: {
+        usuario: z.string().optional().describe("Filtro pelo nome do usuário"),
+        ambiente: z.string().optional().describe("Filtro pelo ambiente"),
+        programa: z.string().optional().describe("Filtro pelo programa (ex.: SIGAFAT, HTTP_START)"),
+        limite: z.number().int().min(1).optional().default(100).describe("Máximo de sessões retornadas"),
+      },
+      annotations: { readOnlyHint: true },
     },
-    annotations: { readOnlyHint: true },
-  },
-  safe(reconectando(true, async ({ usuario, ambiente, programa, limite }) => {
-    const { client, session } = await ensureClient();
-    const active = session.required();
-    const users = await client.getUsers(await session.monitorToken());
-    const has = (value: string | undefined, needle?: string) =>
-      !needle || (value ?? "").toLowerCase().includes(needle.toLowerCase());
-    const filtered = users.filter(
-      (u) => has(u.username, usuario) && has(u.environment, ambiente) && has(u.mainName, programa)
-    );
-    const max = limite ?? 100;
-    return jsonResult({
-      servidor: active.def.name,
-      totalSessoes: users.length,
-      totalFiltrado: filtered.length,
-      exibindo: Math.min(filtered.length, max),
-      sessoes: filtered.slice(0, max).map(userView),
-    });
-  }))
-);
+    safe(reconectando(true, async ({ usuario, ambiente, programa, limite }) => {
+      const { client, session } = await ensureClient();
+      const active = session.required();
+      const users = await client.getUsers(await session.monitorToken());
+      const has = (value: string | undefined, needle?: string) =>
+        !needle || (value ?? "").toLowerCase().includes(needle.toLowerCase());
+      const filtered = users.filter(
+        (u) => has(u.username, usuario) && has(u.environment, ambiente) && has(u.mainName, programa)
+      );
+      const max = limite ?? 100;
+      return jsonResult({
+        servidor: active.def.name,
+        totalSessoes: users.length,
+        totalFiltrado: filtered.length,
+        exibindo: Math.min(filtered.length, max),
+        sessoes: filtered.slice(0, max).map(userView),
+      });
+    }))
+  );
 
-server.registerTool(
-  "tds_monitor_send_message",
-  {
-    title: "Monitor: enviar mensagem a uma sessão",
-    description:
-      "Exibe uma mensagem ao usuário de uma sessão do AppServer conectado. A sessão é " +
-      "identificada pela thread (tds_monitor_users) e conferida na lista atual antes do envio.",
-    inputSchema: {
-      ...targetSchema,
-      mensagem: z.string().trim().min(1).describe("Texto exibido ao usuário"),
+  server.registerTool(
+    "tds_monitor_send_message",
+    {
+      title: "Monitor: enviar mensagem a uma sessão",
+      description:
+        "Exibe uma mensagem ao usuário de uma sessão do AppServer conectado. A sessão é " +
+        "identificada pela thread (tds_monitor_users) e conferida na lista atual antes do envio.",
+      inputSchema: {
+        ...targetSchema,
+        mensagem: z.string().trim().min(1).describe("Texto exibido ao usuário"),
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
     },
-    annotations: { destructiveHint: false, openWorldHint: true },
-  },
-  safe(reconectando(false, async ({ threadId, servidorDaSessao, mensagem }) => {
-    const { client, session } = await ensureClient();
-    const active = session.required();
-    const token = await session.monitorToken();
-    const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
-    const retorno = await client.sendUserMessage(token, target, mensagem);
-    return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  }))
-);
+    safe(reconectando(false, async ({ threadId, servidorDaSessao, mensagem }) => {
+      const { client, session } = await ensureClient();
+      const active = session.required();
+      const token = await session.monitorToken();
+      const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
+      const retorno = await client.sendUserMessage(token, target, mensagem);
+      return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
+    }))
+  );
 
-server.registerTool(
-  "tds_monitor_kill_user",
-  {
-    title: "Monitor: derrubar sessão imediatamente",
-    description:
-      "Encerra IMEDIATAMENTE uma sessão do AppServer conectado (o usuário perde o que não " +
-      "gravou). Para pedir que a aplicação se encerre sozinha, use tds_monitor_app_kill_user. " +
-      "A sessão é identificada pela thread e conferida na lista atual antes da ação.",
-    inputSchema: targetSchema,
-    annotations: { destructiveHint: true },
-  },
-  safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
-    const { client, session } = await ensureClient();
-    const active = session.required();
-    const token = await session.monitorToken();
-    const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
-    const retorno = await client.killUser(token, target);
-    return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  }))
-);
+  server.registerTool(
+    "tds_monitor_kill_user",
+    {
+      title: "Monitor: derrubar sessão imediatamente",
+      description:
+        "Encerra IMEDIATAMENTE uma sessão do AppServer conectado (o usuário perde o que não " +
+        "gravou). Para pedir que a aplicação se encerre sozinha, use tds_monitor_app_kill_user. " +
+        "A sessão é identificada pela thread e conferida na lista atual antes da ação.",
+      inputSchema: targetSchema,
+      annotations: { destructiveHint: true },
+    },
+    safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
+      const { client, session } = await ensureClient();
+      const active = session.required();
+      const token = await session.monitorToken();
+      const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
+      const retorno = await client.killUser(token, target);
+      return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
+    }))
+  );
 
-server.registerTool(
-  "tds_monitor_app_kill_user",
-  {
-    title: "Monitor: pedir encerramento da aplicação da sessão",
-    description:
-      "Pede à aplicação de uma sessão do AppServer conectado que se encerre. É só um pedido: o " +
-      "servidor marca a sessão (observacao \"[APPKILL]\") e ela termina quando o programa atender " +
-      "o pedido; um programa em laço que não o verifica continua rodando. Para derrubar na hora, " +
-      "use tds_monitor_kill_user. A sessão é identificada pela thread e conferida na lista atual.",
-    inputSchema: targetSchema,
-    annotations: { destructiveHint: true },
-  },
-  safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
-    const { client, session } = await ensureClient();
-    const active = session.required();
-    const token = await session.monitorToken();
-    const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
-    const retorno = await client.appKillUser(token, target);
-    return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
-  }))
-);
+  server.registerTool(
+    "tds_monitor_app_kill_user",
+    {
+      title: "Monitor: pedir encerramento da aplicação da sessão",
+      description:
+        "Pede à aplicação de uma sessão do AppServer conectado que se encerre. É só um pedido: o " +
+        "servidor marca a sessão (observacao \"[APPKILL]\") e ela termina quando o programa atender " +
+        "o pedido; um programa em laço que não o verifica continua rodando. Para derrubar na hora, " +
+        "use tds_monitor_kill_user. A sessão é identificada pela thread e conferida na lista atual.",
+      inputSchema: targetSchema,
+      annotations: { destructiveHint: true },
+    },
+    safe(reconectando(false, async ({ threadId, servidorDaSessao }) => {
+      const { client, session } = await ensureClient();
+      const active = session.required();
+      const token = await session.monitorToken();
+      const target = await findMonitorTarget(client, token, threadId, servidorDaSessao);
+      const retorno = await client.appKillUser(token, target);
+      return jsonResult({ servidor: active.def.name, sessao: userView(target), retornoDoServidor: retorno });
+    }))
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Execução e depuração (debugAdapter da TOTVS + webapp)
@@ -1630,7 +1645,7 @@ server.registerTool(
       "login com usuário e senha do Protheus (os mesmos de tds_use_server; sem eles, peça ao " +
       "usuário) e mostra empresa (campo Grupo) e filial já preenchidas com o último acesso: " +
       "troque com fill antes de Entrar se o usuário pediu outra. Depois vêm avisos e diálogos " +
-      "de entrada do módulo; a carga pode levar minutos. No tds_monitor_users essa thread aparece " +
+      "de entrada do módulo; a carga pode levar minutos. No monitor do AppServer essa thread aparece " +
       "como programa SIGABPM. Sem modulo, a função é o programa inicial e roda sem empresa " +
       "aberta. modo 'job': também captura threads novas do ambiente (StartJob, REST), inclusive " +
       "jobs do servidor e threads de outras pessoas conectadas; use só em AppServer exclusivo de " +
@@ -1952,8 +1967,8 @@ server.registerTool(
       "SmartClient HTML (webapp), e diz como terminou no campo `resultado`: 'concluido', 'erro' " +
       "(mensagem, fonte/linha e a tela de detalhes com pilha e variáveis) ou 'tempoEsgotado' " +
       "(ainda rodando ou esperando resposta num diálogo; vêm `tela` e `botoes`). No tempo " +
-      "esgotado a execução é encerrada: o navegador fecha e a thread termina (confira com " +
-      "tds_monitor_users se a rotina estava num processamento longo). 'falhaDeAmbiente': a tela " +
+      "esgotado a execução é encerrada: o navegador fecha e a thread termina (num processamento " +
+      "longo ela pode seguir no AppServer: confira no monitor do AppServer). 'falhaDeAmbiente': a tela " +
       "mostrou falha do WebAgent ou da conexão do webapp com o AppServer e o programa não ia " +
       "seguir; vêm `causa` e `tela`, sem esperar o prazo. O valor de retorno da função não volta " +
       "sozinho: para receber um valor, o wrapper termina com UserException(\"RESULTADO: \" + " +

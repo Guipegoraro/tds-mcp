@@ -35,6 +35,11 @@ export interface TdsMcpConfig {
   debugIdleMinutes?: number;
   /** TOTVS WebAgent (web-agent.exe ou a pasta dele) compatível com o webapp dos servidores. */
   webAgentPath?: string;
+  /**
+   * Liga as tools tds_monitor_* (padrão desligado; lido só na subida do MCP).
+   * Atrás de um balanceador elas veem só o AppServer em que a conexão caiu.
+   */
+  enableMonitor?: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".tds-mcp");
@@ -57,6 +62,7 @@ const FIELD_SCHEMAS: Record<keyof TdsMcpConfig, z.ZodTypeAny> = {
   webappUrls: z.record(z.string().min(1)),
   debugIdleMinutes: z.number().positive(),
   webAgentPath: z.string().min(1),
+  enableMonitor: z.boolean(),
 };
 
 /** Problemas encontrados ao ler o config.json (mostrados em tds_server_log). */

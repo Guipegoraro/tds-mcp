@@ -36,6 +36,8 @@ await mcp.connect(
     args: [path.join(here, "..", "dist", "index.js")],
     env: {
       ...process.env,
+      // As tools tds_monitor_* são desligadas por padrão.
+      TDS_MCP_MONITOR: "1",
       USERPROFILE: home,
       HOME: home,
       // O HOME falso esconde o config.json; o advpls continua o do config do usuário.

@@ -135,7 +135,7 @@ só repassa módulo e rotina. Telas de entrada (variam por ambiente e versão):
 5. A rotina começa; o breakpoint para.
 
 A carga do módulo pode levar minutos; enquanto carrega, `take_snapshot` mostra
-"Carregando" ou vem vazio. No `tds_monitor_users` a thread aparece como programa
+"Carregando" ou vem vazio. No monitor do AppServer a thread aparece como programa
 `SIGABPM`. Códigos comuns: 02 SIGACOM, 04 SIGAEST, 05 SIGAFAT, 06 SIGAFIN, 10 SIGAPCP,
 34 SIGACTB; `modulo` aceita o código ou o nome.
 
@@ -237,9 +237,10 @@ Receita da documentação do depurador do tds-vscode:
 1. No appserver.ini do servidor de desenvolvimento: comentar o `[OnStart]` (ou deixar só
    os jobs necessários, com `RefreshRate=30`) e `[General] BUILDKILLUSERS=1` (compilar
    derruba todas as conexões da instância); reiniciar o AppServer.
-2. Encerrar threads antigas da sua própria execução com `tds_monitor_users` +
-   `tds_monitor_kill_user`, com autorização do usuário; se aparecer sessão de outra
-   pessoa, o servidor não é exclusivo: pare e avise.
+2. Encerrar threads antigas da sua própria execução, com autorização do usuário: pelo
+   monitor do TDS, ou com `tds_monitor_users` + `tds_monitor_kill_user` quando o
+   `enableMonitor` estiver ligado (só em AppServer sem balanceador). Se aparecer sessão de
+   outra pessoa, o servidor não é exclusivo: pare e avise.
 3. Compile antes de iniciar o depurador (com `BUILDKILLUSERS=1`, compilar derruba a
    sessão): o fonte do serviço e uma função que dispare o job e espere, como temporário
    e nomeada com o `prefixoWrapper` (ex.: `User Function zTK3FRst()` →
@@ -337,8 +338,9 @@ em texto): ali não há print, e o relato diz isso.
   (`~/.tds-mcp/config.json`) sem uso
   (padrão 10 min; no modo navegador, o triplo: 30 min com o padrão), a próxima chamada falha dizendo qual aba
   fechar. Feche-a (`list_pages` mostra `isolatedContext=tds-<id>` e a URL com
-  `DEBUG=<id>`), confira com `tds_monitor_users` se sobrou thread da execução e, com
-  autorização do usuário, encerre-a com `tds_monitor_kill_user`. Depois, inicie de novo.
+  `DEBUG=<id>`), peça ao usuário para conferir no monitor do TDS se sobrou thread da
+  execução (com `enableMonitor` ligado, `tds_monitor_users`) e, com autorização dele,
+  encerre-a. Depois, inicie de novo.
 - **"exige autenticação ... token de reconexão do TDS não funcionou"**: o token salvo
   pelo VS Code expirou. Peça usuário e senha e passe em `tds_use_server`, ou o usuário
   conecta no servidor pelo VS Code (renova o token).

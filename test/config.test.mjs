@@ -35,12 +35,14 @@ try {
         chromiumPath: "C:\\chrome.exe",
         advplsPath: "",
         desconhecido: 1,
+        enableMonitor: "true",
       })
   );
   c = loadConfig(file);
   check("campo nulo mantém o padrão", c.patchesRoot === "C:\\TOTVS\\patches");
   check("credenciais válidas são mantidas", c.credentials.Srv?.user === "u");
   check("campo de tipo errado é descartado com aviso", c.debugIdleMinutes === undefined && configWarnings.some((w) => /debugIdleMinutes/.test(w)), configWarnings.join(" | "));
+  check("enableMonitor que não é booleano é descartado com aviso", c.enableMonitor === undefined && configWarnings.some((w) => /enableMonitor/.test(w)), configWarnings.join(" | "));
   check("demais campos válidos são mantidos", c.chromiumPath === "C:\\chrome.exe");
   check("caminho vazio conta como não informado, sem aviso", c.advplsPath === undefined && configWarnings.every((w) => !/advplsPath/.test(w)));
   check("BOM no início é aceito", configWarnings.every((w) => !/JSON válido/.test(w)));

@@ -142,7 +142,7 @@ export const FALHAS_DE_AMBIENTE: { padrao: RegExp; causa: string }[] = [
     padrao: /ERR0032|Conex[aã]o entre TOTVS Webapp e Application Server interrompida/i,
     causa:
       "A conexão do webapp com o AppServer caiu (AppServer reiniciado, thread derrubada pelo monitor ou " +
-      "rede instável): confira o servidor com tds_monitor_users e rode de novo.",
+      "rede instável): rode de novo e, se voltar, avise o usuário.",
   },
 ];
 

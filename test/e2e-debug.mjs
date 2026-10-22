@@ -3,7 +3,7 @@
 // ambiente de desenvolvimento.
 // Uso: node test/e2e-debug.mjs <servidor> [ambiente]
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -38,6 +38,8 @@ const L_ERRO = lineOf("nVarNaoExisteE2e");
 const transport = new StdioClientTransport({
   command: process.execPath,
   args: [path.join(here, "..", "dist", "index.js")],
+  // As tools tds_monitor_* são desligadas por padrão.
+  env: { ...getDefaultEnvironment(), TDS_MCP_MONITOR: "1" },
 });
 const mcp = new Client({ name: "e2e-debug", version: "0.0.1" });
 await mcp.connect(transport);
@@ -356,6 +358,8 @@ try {
   const transportOutro = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(here, "..", "dist", "index.js")],
+    // As tools tds_monitor_* são desligadas por padrão.
+    env: { ...getDefaultEnvironment(), TDS_MCP_MONITOR: "1" },
   });
   await outro.connect(transportOutro);
   pidsDoTeste.push(transportOutro.pid);

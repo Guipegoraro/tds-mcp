@@ -94,10 +94,10 @@ A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao
 | `tds_server_log` | Últimas mensagens do advpls + caminho e versões do tds-ls/extensão | read-only |
 | `tds_server_files` | Pastas e arquivos de uma pasta do AppServer | read-only |
 | `tds_server_permissions` | Operações que o usuário pode executar no AppServer | read-only |
-| `tds_monitor_users` | Sessões (threads) conectadas: usuário, ambiente, programa, memória | read-only |
-| `tds_monitor_send_message` | Envia mensagem ao usuário de uma sessão | **afeta usuário** |
-| `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre | **destrutivo** |
-| `tds_monitor_kill_user` | Derruba a sessão imediatamente | **destrutivo** |
+| `tds_monitor_users` | Sessões (threads) conectadas: usuário, ambiente, programa, memória. Desligada por padrão (ver abaixo) | read-only |
+| `tds_monitor_send_message` | Envia mensagem ao usuário de uma sessão. Desligada por padrão | **afeta usuário** |
+| `tds_monitor_app_kill_user` | Pede à aplicação da sessão que se encerre. Desligada por padrão | **destrutivo** |
+| `tds_monitor_kill_user` | Derruba a sessão imediatamente. Desligada por padrão | **destrutivo** |
 | `tds_run` | Executa uma função num SmartClient HTML invisível: concluído (com `retorno` quando o wrapper termina em `UserException("RESULTADO: ...")`), erro (fonte/linha + pilha com variáveis), falha de ambiente (tela do WebAgent ou da conexão do webapp, sem esperar o prazo) ou tempo esgotado (texto da tela); arquivos enviados ao navegador (PDF, CpyS2TW) em `arquivosBaixados` | **executa código** |
 | `tds_debug_start` | Inicia depuração (modos headless, navegador para operar telas pelo chrome-devtools, job para StartJob/REST); `modulo` roda a rotina dentro do módulo pelo SIGABPM; `detalheTexto` mostra os bytes das strings na sessão | **executa código** |
 | `tds_debug_wait` / `tds_debug_step` | Espera parada / continua, próxima, entrar, sair; devolve local, pilha, Local/Private/Static, watches e o que mudou | depuração |
@@ -138,8 +138,12 @@ andamento, compilação, geração, validação e aplicação de patch e remoç�
 recusadas: encerre com `tds_debug_stop` ou espere o `tds_run` terminar. Sessão de outro
 tds-mcp ou do TDS no mesmo AppServer não é vista.
 
-As ações do monitor identificam a sessão pela thread e conferem na lista atual do monitor antes
-de agir.
+As tools `tds_monitor_*` vêm **desligadas**: num servidor atrás de balanceador (a porta da nuvem
+TOTVS, por exemplo), a conexão de monitor cai num AppServer só, e a lista sai sem as sessões dos
+outros, sem erro. Elas aparecem
+com `"enableMonitor": true` no `~/.tds-mcp/config.json` (ou `TDS_MCP_MONITOR=1`), lido na subida do
+MCP; use num AppServer sem balanceador, como o local. As ações do monitor identificam a sessão
+pela thread e conferem na lista atual do monitor antes de agir.
 Uma thread parada num breakpoint fica presa no AppServer até o depurador sair: `tds_debug_stop`
 libera, e a sessão também encerra sozinha por inatividade (`debugIdleMinutes`) e quando o tds-mcp fecha.
 As demais tools são read-only e podem ser liberadas sem risco.
@@ -372,6 +376,8 @@ Opcional. Copie `config.example.json` para `~/.tds-mcp/config.json`:
   binário vem sem assinatura digital e não se atualiza sozinho.
 - `webAgentPath` — WebAgent compatível com o webapp dos servidores, quando não for o instalado
   (também `TDS_MCP_WEBAGENT`)
+- `enableMonitor` — `true` liga as tools `tds_monitor_*` (padrão desligado; também
+  `TDS_MCP_MONITOR=1`). Só muda ao reconectar o MCP
 
 Um caminho informado (`advplsPath`, `debugAdapterPath`, `chromiumPath`, `webAgentPath` ou as variáveis de
 ambiente) que não existe é erro: o tds-mcp não troca por outro binário sem avisar. Campo com

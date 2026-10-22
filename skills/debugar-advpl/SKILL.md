@@ -139,9 +139,13 @@ abre no visualizador da máquina e não volta (REFERENCE.md, "TOTVS WebAgent").
    o que ficou no RPO; remova com `tds_rpo_delete` depois de o usuário confirmar fontes,
    servidor e ambiente.
    Concluído quando: `encerrada`, nenhuma aba `tds-*` no webapp (fechada, ou em
-   `about:blank` quando era a última aba) e
-   `tds_monitor_users` sem thread da execução: filtre pelo programa inicial (`SIGABPM` com
-   `modulo`, senão o nome da função ou do wrapper). A sua é a de `computador` igual ao
+   `about:blank` quando era a última aba) e nenhuma thread da execução no monitor.
+   As tools `tds_monitor_*` vêm desligadas: atrás de um balanceador (nuvem TOTVS) a lista
+   sai só com o AppServer em que a conexão caiu, e 0 sessões não prova nada. Sem elas,
+   diga ao usuário o que conferir no monitor do TDS (programa e computador abaixo). Com
+   `enableMonitor` ligado, num AppServer sem balanceador, use `tds_monitor_users`
+   filtrando pelo programa inicial (`SIGABPM` com `modulo`, senão o nome da função ou do
+   wrapper). A sua é a de `computador` igual ao
    `maquinaLocal` do `tds_use_server` (sem diferenciar maiúsculas). Exceção: thread
    criada por StartJob ou REST (modo `job`) nasce no AppServer e traz o computador do
    servidor; procure-a pelo nome da função do job e pela hora de conexão, e confira se o
