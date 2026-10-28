@@ -7,7 +7,7 @@
  * uma rotina do Microsiga Protheus").
  */
 
-/** Código do módulo -> sufixo do nome SIGAxxx (referência TOTVS, MCP advpl-tlpp-mcp-docs). */
+/** Código do módulo -> sufixo do nome SIGAxxx (referência TOTVS, MCP totvs-protheus-mcp). */
 export const MODULOS: Record<string, string> = {
   "01": "ATF",
   "02": "COM",
