@@ -175,17 +175,24 @@ serial, volta vazio). O Chromium headless do tds-mcp faz o mesmo sozinho. `tds_d
 AppServer o programa que não estava parado num breakpoint. O agente da sessão encerra quando a
 página sai do programa ou a aba fecha.
 
-Três argumentos no MCP chrome-devtools ajudam o modo navegador:
+O tds-mcp traz um iniciador do MCP chrome-devtools, e dois argumentos ajudam o modo navegador:
 
 ```json
-"args": ["<...>/chrome-devtools-mcp.js", "--isolated",
+"args": ["<...>/tds-mcp/dist/chrome-devtools.js",
          "--chromeArg=--disable-features=LocalNetworkAccessChecks",
          "--chromeArg=--start-maximized"]
 ```
 
-- `--isolated`: cada sessão do Claude sobe o próprio Chromium com perfil temporário. Sem ele, todas
-  usam o mesmo perfil, e a segunda sessão recebe "The browser is already running" até a primeira
-  fechar o navegador.
+- `dist/chrome-devtools.js`: inicia o `chrome-devtools-mcp` instalado com `npm install -g` e repassa os
+  argumentos. Cada sessão do Claude sobe o próprio Chromium com perfil temporário. Com um perfil só
+  para todas, a segunda sessão recebe "The browser is already running" até a primeira fechar o
+  navegador. O `--isolated` do próprio chrome-devtools também separa as sessões, mas cada perfil
+  novo dele faz o Chromium testar um login com senha vazia: numa máquina fora de domínio o Windows
+  conta como senha errada e, no limite da política de bloqueio, bloqueia a conta do usuário. O
+  iniciador já cria o perfil marcado para o Chromium não fazer esse teste, como no headless. O perfil
+  fica em `%TEMP%\tds-mcp\chrome-devtools` e é apagado quando a sessão fecha; o de uma sessão
+  encerrada à força sai no início da próxima. Com `--browserUrl`, `--wsEndpoint`, `--autoConnect` ou
+  `--userDataDir` o iniciador só repassa os argumentos.
 - `--disable-features=LocalNetworkAccessChecks`: o webapp de um AppServer remoto chama o WebAgent
   em 127.0.0.1, e o Chromium pede ao usuário a permissão "Acessar outros apps e serviços neste
   dispositivo" a cada servidor. O Chromium headless do tds-mcp já sobe com essa flag.
@@ -395,6 +402,8 @@ npm test                                       # testes de lógica e do linter l
 node test/smoke.mjs <servidor> [ambiente]      # read-only: conecta e inspeciona o RPO
 node test/debug-protocol.mjs [host] [porta]    # JSON-RPC cru (diagnóstico de protocolo)
 node test/debug-returncode.mjs <srv> [amb]     # read-only: returnCode em cada cenário
+node test/e2e-senha-windows.mjs                # não precisa de AppServer: abrir o headless não conta senha errada na conta local do Windows
+node test/e2e-chrome-devtools.mjs [--headless]  # não precisa de AppServer: iniciador do chrome-devtools (isolamento, perfis apagados, senha errada)
 node test/e2e-readonly.mjs <servidor> [amb]    # read-only: E2E pelo servidor MCP
 node test/e2e-admin-readonly.mjs <srv> [amb]   # read-only: binário, privilégios, pastas e monitor
 node test/e2e-debug.mjs <servidor> [amb]       # COMPILA test/zTstDbg1.prw e executa/depura as funções dele

@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isFile } from "./advpls.js";
+import { marcarSenhaNaoVazia } from "./perfil.js";
 import { SCRIPT_PORTA_AGENTE } from "./webagent.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -143,6 +144,7 @@ export class HeadlessWebapp {
     fs.mkdirSync(baseDir, { recursive: true });
     // O pid no nome, como no log do adaptador, diz de qual tds-mcp é cada perfil.
     const profileDir = fs.mkdtempSync(path.join(baseDir, `chromium-profile-${process.pid}-`));
+    marcarSenhaNaoVazia(profileDir);
     const portFile = path.join(profileDir, "DevToolsActivePort");
     const proc = spawn(
       chromiumPath,

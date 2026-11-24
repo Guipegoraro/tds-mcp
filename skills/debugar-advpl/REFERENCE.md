@@ -326,8 +326,15 @@ em texto): ali não há print, e o relato diz isso.
   repita em laço: um login que passa depois de falhar não tira o conflito.
 - **chrome-devtools responde "The browser is already running for ...chrome-profile"**: outra
   sessão do Claude está com o navegador do perfil compartilhado. O MCP chrome-devtools
-  precisa do argumento `--isolated` (README do tds-mcp); avise o usuário, que reconecta o
-  MCP pelo `/mcp`. Enquanto isso, use o modo headless.
+  precisa do iniciador `dist/chrome-devtools.js` (README do tds-mcp); avise o usuário, que reconecta o
+  MCP pelo `/mcp`. Enquanto isso, use o modo headless. Com o iniciador (caminho
+  `tds-mcp\chrome-devtools\perfil-...` na mensagem), é o navegador anterior da própria sessão
+  ainda fechando: espere alguns segundos e repita.
+- **Conta do Windows bloqueada ("a conta referenciada está bloqueada")**: perfil novo de Chromium
+  faz um login com senha vazia, que o Windows conta como senha errada. O tds-mcp e o iniciador
+  `dist/chrome-devtools.js` evitam isso; chrome-devtools com `--isolated` ou outra automação com
+  perfil novo não. Pare de abrir navegador, avise o usuário para não bloquear a tela nem reiniciar,
+  e confira o registro do MCP.
 - **Aviso "A resolução mínima indicada ... é 1024 x 768" ao abrir a página**: a janela do
   chrome-devtools abriu menor que a tela. Feche o aviso (botão "Fechar") e siga; o programa
   funciona. O argumento `--chromeArg=--start-maximized` no MCP chrome-devtools (README do
