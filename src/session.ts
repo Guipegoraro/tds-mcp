@@ -154,7 +154,7 @@ export function conexaoPerdida(message: string): boolean {
 }
 
 /** Endereço sem esquema (o servers.json aceita "http://host"). */
-function hostDe(address: string): string {
+export function hostDe(address: string): string {
   return address.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
 }
 
@@ -177,7 +177,7 @@ export function portaAceita(host: string, port: number, timeoutMs = 5000): Promi
  * fechada aponta para rede (servidor, VPN, porta); porta aberta, para o
  * AppServer (banco, licença, sobrecarga, build incompatível).
  */
-async function explicarFalhaDeConexao(def: TdsServerDef, message: string): Promise<string> {
+export async function explicarFalhaDeConexao(def: Pick<TdsServerDef, "address" | "port">, message: string): Promise<string> {
   const destino = `${def.address}:${def.port}`;
   const aberta = await portaAceita(hostDe(def.address), def.port);
   return aberta

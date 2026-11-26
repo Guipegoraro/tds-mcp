@@ -52,8 +52,10 @@ import {
   serversJsonPath,
   effectiveIncludes,
   authorizationToken,
+  explicarFalhaDeConexao,
   type ActiveSession,
 } from "./session.js";
+import { cadastrarServidor } from "./servidores.js";
 import {
   nowStamp,
   patchBaseName,
@@ -403,6 +405,44 @@ server.registerTool(
         usuario: s.username,
       })),
     });
+  })
+);
+
+server.registerTool(
+  "tds_server_add",
+  {
+    title: "Cadastrar servidor Protheus no servers.json",
+    description:
+      "Cadastra um servidor Protheus no servers.json do TDS (o mesmo que tds_list_servers mostra em " +
+      "`arquivoConfig`), para tds_use_server e o VS Code enxergarem. Valida o servidor no AppServer antes " +
+      "(versão do build e se a conexão é segura) e grava o que a validação devolveu; se `segura` informado " +
+      "divergir da validação, vale a validação e o retorno avisa. Recusa nome repetido (sem diferenciar " +
+      "maiúsculas) e o mesmo endereço+porta. Se a validação falhar nada é gravado: no TCloud o servidor de " +
+      "debug só responde com o modo debug ligado. Sem `includes`, usa a lista global do servers.json. Faz " +
+      "cópia de backup ao lado do arquivo e preserva as demais entradas, tokens e chaves. A entrada nova não " +
+      "tem login: a primeira conexão pede tds_use_server com usuario e senha, ou uma conexão pelo VS Code.",
+    inputSchema: {
+      nome: z.string().min(1).describe("Nome do servidor (único no servers.json, sem diferenciar maiúsculas)"),
+      endereco: z.string().min(1).describe("Endereço (host ou IP) do AppServer"),
+      porta: z.number().int().min(1).max(65535).describe("Porta do AppServer"),
+      ambientes: z.array(z.string().min(1)).min(1).describe("Nomes dos ambientes do servidor (ao menos um)"),
+      segura: z.boolean().optional().describe("Conexão SSL; a validação do servidor prevalece sobre este valor"),
+      includes: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Pastas de include do servidor; padrão: as globais do servers.json"),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+    _meta: { "anthropic/requiresUserInteraction": true },
+  },
+  safe(async ({ nome, endereco, porta, ambientes, segura, includes }) => {
+    const { client } = await ensureClient();
+    const cadastrado = await cadastrarServidor(
+      { nome, endereco, porta, ambientes, segura, includes },
+      (host, port, tipo) => client.validation(host, port, tipo),
+      { explicarFalha: (msg) => explicarFalhaDeConexao({ address: endereco, port: porta }, msg) }
+    );
+    return jsonResult({ cadastrado: true, ...cadastrado });
   })
 );
 

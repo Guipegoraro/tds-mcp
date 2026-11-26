@@ -73,11 +73,26 @@ Autenticação, em ordem:
 
 A conexão do MCP é independente da do VS Code: ambos podem estar conectados ao mesmo tempo.
 
+### Cadastrar um servidor novo
+
+`tds_server_add` recebe `nome`, `endereco`, `porta` e `ambientes` (e, opcionalmente, `segura` e
+`includes`) e acrescenta a entrada em `configurations`, no mesmo formato que o TDS-VSCode grava
+(`id`, `type`, `name`, `port`, `address`, `buildVersion`, `secure`, `includes`, `environments`). Antes de
+gravar ele valida o servidor no AppServer, como o TDS faz ao cadastrar: o build e o `secure` gravados
+são os da validação, e o retorno avisa quando o `segura` informado diverge. Se a validação falhar
+(servidor fora do ar, porta errada) nada é gravado; no TCloud o servidor de debug só responde com o modo
+debug ligado. Sem `includes`, vale a lista global do servers.json. O arquivo é o mesmo que o MCP lê
+(`TDS_MCP_SERVERS_JSON`, workspace, `~/.totvsls`); antes de alterar, o MCP copia o arquivo para
+`servers.json.tds-mcp-<data>-<hora>.bak` na mesma pasta e grava por arquivo temporário + rename,
+mantendo indentação, fim de linha e as outras entradas, tokens e chaves. A entrada nova não tem login:
+conecte pela primeira vez com `tds_use_server` informando `usuario` e `senha`, ou uma vez pelo VS Code.
+
 ## Tools
 
 | Tool | Descrição | Efeito |
 |---|---|---|
 | `tds_list_servers` | Servidores do servers.json, ambientes, sessão ativa e binário advpls em uso | read-only |
+| `tds_server_add` | Cadastra um servidor no servers.json do TDS depois de validá-lo no AppServer (grava o build e o `secure` que a validação devolve); recusa nome ou endereço+porta repetidos e não grava se a validação falhar. Faz backup ao lado do arquivo e preserva as demais entradas. Pede aprovação do usuário em toda chamada | **grava o servers.json** |
 | `tds_use_server` | Conecta/autentica em servidor + ambiente (token do TDS, ou `usuario`/`senha` informados — não gravados). Aceita id, nome ou parte única do nome; parte que casa com mais de um servidor é recusada. A sessão anterior só é encerrada depois que a nova conecta; na falha, o erro diz se a porta aceita conexão (rede/VPN fora ou AppServer sem responder). Devolve `prefixoWrapper` (início do nome de wrapper de teste, único por pessoa e máquina) e `maquinaLocal` (o computador das suas execuções no monitor) | sessão |
 | `tds_compile` | Compila fontes/pastas no RPO; `sucesso` só com resultado comprovado para cada fonte (resposta vazia ou status desconhecido vem em `inconclusivo`); `resultados` traz os fontes com erro, aviso ou detalhe, agrupado (SUCCESS sem detalhe só na contagem); `avisoColisaoDeNome` aponta funções que coincidem nos 10 primeiros caracteres; `temporario` registra o fonte para remoção posterior | **grava no RPO** |
 | `tds_syntax_check` | Verifica sintaxe com o linter do TDS (erros e avisos com linha) e a colisão de nomes nos 10 primeiros caracteres; não usa o AppServer | nenhum |
@@ -146,6 +161,8 @@ MCP; use num AppServer sem balanceador, como o local. As ações do monitor iden
 pela thread e conferem na lista atual do monitor antes de agir.
 Uma thread parada num breakpoint fica presa no AppServer até o depurador sair: `tds_debug_stop`
 libera, e a sessão também encerra sozinha por inatividade (`debugIdleMinutes`) e quando o tds-mcp fecha.
+`tds_server_add` grava no servers.json do usuário e leva a marca `anthropic/requiresUserInteraction`, que faz o
+Claude Code pedir aprovação em toda chamada, mesmo com a tool liberada nas permissões.
 As demais tools são read-only e podem ser liberadas sem risco.
 
 ## Execução e depuração
